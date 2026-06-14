@@ -1,0 +1,44 @@
+{
+  "name": "site-shot-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Site-Shot — give Claude and other AI agents the ability to take website screenshots (real Chromium, full-page, country proxies, automatic ad & cookie-banner removal).",
+  "type": "module",
+  "bin": {
+    "site-shot-mcp": "src/index.js"
+  },
+  "main": "src/server.js",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/server.js && node --check src/index.js",
+    "smoke": "node test/smoke.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "screenshot",
+    "website-screenshot",
+    "screenshot-api",
+    "claude",
+    "ai-agents",
+    "puppeteer",
+    "site-shot"
+  ],
+  "homepage": "https://www.site-shot.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/site-shot/site-shot-mcp.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  }
+}

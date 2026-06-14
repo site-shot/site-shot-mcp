@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.site-shot/site-shot-mcp",
+  "description": "Take website screenshots with Site-Shot — real Chromium rendering, full-page capture, country proxies, and automatic ad & cookie-banner removal.",
+  "title": "Site-Shot",
+  "websiteUrl": "https://www.site-shot.com/",
+  "repository": {
+    "url": "https://github.com/site-shot/site-shot-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "site-shot-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SITESHOT_API_KEY",
+          "description": "Your Site-Shot API key (used as the userkey). Get one at https://www.site-shot.com/pricing/",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
