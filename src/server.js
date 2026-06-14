@@ -150,7 +150,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: "0.1.0",
+    version: "0.1.1",
   });
 
   server.registerTool(

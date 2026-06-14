@@ -1,6 +1,7 @@
 {
   "name": "site-shot-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "mcpName": "io.github.site-shot/site-shot-mcp",
   "description": "MCP server for Site-Shot — give Claude and other AI agents the ability to take website screenshots (real Chromium, full-page, country proxies, automatic ad & cookie-banner removal).",
   "type": "module",
   "bin": {
