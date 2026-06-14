@@ -104,4 +104,31 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/6 smoke checks passed`);
+// 7) Bare domain (no scheme) gets https:// assumed
+{
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(PNG);
+  };
+  const res = await captureScreenshot({ url: "example.com" }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, undefined, "bare domain should be accepted");
+  assert.equal(new URL(calledUrl).searchParams.get("url"), "https://example.com");
+  passed++;
+}
+
+// 8) Clearly invalid URL returns a helpful error without calling the API
+{
+  let fetched = false;
+  const fetchImpl = async () => {
+    fetched = true;
+    return fakeImageResponse(PNG);
+  };
+  const res = await captureScreenshot({ url: "   " }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /Invalid URL/);
+  assert.equal(fetched, false, "should not call the API on an invalid url");
+  passed++;
+}
+
+console.log(`ok — ${passed}/8 smoke checks passed`);

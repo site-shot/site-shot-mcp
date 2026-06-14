@@ -24,7 +24,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   }
 
   const {
-    url,
+    url: rawUrl,
     full_page = false,
     width,
     height,
@@ -38,6 +38,24 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     wait_ms,
     max_height,
   } = args;
+
+  // Accept bare domains like "example.com" by assuming https://, so agents
+  // don't have to remember the scheme.
+  const trimmed = String(rawUrl ?? "").trim();
+  const url = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    new URL(url);
+  } catch {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Invalid URL: "${rawUrl}". Pass a web page URL such as https://example.com (a bare domain like example.com also works).`,
+        },
+      ],
+    };
+  }
 
   const params = new URLSearchParams();
   params.set("url", url);
@@ -106,7 +124,10 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
 
 // Shared input schema (zod raw shape) for both tools.
 const baseInputShape = {
-  url: z.string().url().describe("The URL of the web page to capture."),
+  url: z
+    .string()
+    .min(1)
+    .describe("The URL of the web page to capture. A bare domain like example.com is accepted (https:// is assumed)."),
   width: z.number().int().min(100).max(8000).optional().describe("Viewport width in pixels (default 1280)."),
   height: z.number().int().min(100).max(20000).optional().describe("Viewport height in pixels (default 1024)."),
   format: z.enum(["png", "jpeg"]).optional().describe("Image format. Default: png."),
@@ -150,7 +171,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: "1.0.0",
+    version: "1.0.1",
   });
 
   server.registerTool(
