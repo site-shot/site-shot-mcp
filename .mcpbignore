@@ -1,0 +1,7 @@
+.git
+test
+Dockerfile
+glama.json
+server.json
+*.mcpb
+.mcpbignore
