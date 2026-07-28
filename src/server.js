@@ -32,6 +32,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     block_ads = true,
     block_cookie_banners = true,
     country,
+    strict_country = true,
     language,
     time_zone,
     geolocation,
@@ -57,6 +58,29 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     };
   }
 
+  // Site-Shot matches the country code exactly. Anything it doesn't recognise — a full
+  // name like "Germany" — silently renders through a US proxy, which the caller can't
+  // spot in the returned image, so reject unusable values before spending a render.
+  let countryCode;
+  if (country != null && String(country).trim() !== "") {
+    const rawCountry = String(country).trim();
+    if (!/^[A-Za-z]{2}$/.test(rawCountry)) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text:
+              `Invalid country: "${rawCountry}". Use a two-letter ISO 3166-1 alpha-2 code — ` +
+              `"DE" for Germany, "FR" for France, "JP" for Japan. Full country names are not ` +
+              `accepted. Full list: https://www.site-shot.com/countries`,
+          },
+        ],
+      };
+    }
+    countryCode = rawCountry.toUpperCase();
+  }
+
   const params = new URLSearchParams();
   params.set("url", url);
   params.set("userkey", apiKey);
@@ -72,7 +96,11 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   if (height != null) params.set("height", String(height));
   if (block_ads) params.set("no_ads", "1");
   if (block_cookie_banners) params.set("no_cookie_popup", "1");
-  if (country) params.set("country", country);
+  if (countryCode) {
+    params.set("country", countryCode);
+    // Fail loudly rather than returning a US screenshot the caller believes is local.
+    if (strict_country) params.set("strict_country", "1");
+  }
   if (language) params.set("language", language);
   if (time_zone) params.set("time_zone", time_zone);
   if (geolocation) params.set("geolocation", geolocation);
@@ -116,6 +144,12 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   } catch {
     /* keep status-only detail */
   }
+  if (/country_unavailable/i.test(detail)) {
+    detail +=
+      ` — no proxy is available for country "${countryCode}". Pick another country ` +
+      `(https://www.site-shot.com/countries), or pass strict_country: false to render ` +
+      `through a US proxy instead.`;
+  }
   return {
     isError: true,
     content: [{ type: "text", text: `Site-Shot could not capture the screenshot: ${detail}` }],
@@ -139,7 +173,18 @@ const baseInputShape = {
   country: z
     .string()
     .optional()
-    .describe('Render through a proxy in this country, e.g. "Germany" (auto-sets IP, language, time zone, geolocation).'),
+    .describe(
+      'Render through a proxy in this country, given as a two-letter ISO 3166-1 alpha-2 code — ' +
+        '"DE" for Germany, "FR" for France, "JP" for Japan. Full country names are not accepted. ' +
+        'Auto-sets IP, language, time zone and geolocation. Full list: https://www.site-shot.com/countries',
+    ),
+  strict_country: z
+    .boolean()
+    .optional()
+    .describe(
+      "Error out when the requested country has no proxy available, instead of silently " +
+        "falling back to a US proxy. Only applies when country is set. Default: true.",
+    ),
   language: z.string().optional().describe('Override browser language, e.g. "de".'),
   time_zone: z.string().optional().describe('Override time zone, e.g. "Europe/Berlin".'),
   geolocation: z.string().optional().describe('Override geolocation as "lat,lng".'),
@@ -171,7 +216,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: "1.0.1",
+    version: "1.0.2",
   });
 
   server.registerTool(

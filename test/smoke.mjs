@@ -30,7 +30,7 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
     return fakeImageResponse(PNG);
   };
   const res = await captureScreenshot(
-    { url: "https://example.com", width: 1280, country: "Germany" },
+    { url: "https://example.com", width: 1280, country: "DE" },
     { apiKey: "TESTKEY", fetchImpl },
   );
   assert.equal(res.isError, undefined, "success should not be an error");
@@ -44,7 +44,8 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   assert.equal(u.searchParams.get("no_ads"), "1", "ads blocked by default");
   assert.equal(u.searchParams.get("no_cookie_popup"), "1", "cookie banners blocked by default");
   assert.equal(u.searchParams.get("width"), "1280");
-  assert.equal(u.searchParams.get("country"), "Germany");
+  assert.equal(u.searchParams.get("country"), "DE");
+  assert.equal(u.searchParams.get("strict_country"), "1", "strict country by default");
   assert.equal(u.searchParams.get("full_size"), null, "viewport capture by default");
   passed++;
 }
@@ -131,4 +132,73 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/8 smoke checks passed`);
+// 9) Country code is normalised to upper case (agents may send "de" like a language tag)
+{
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(PNG);
+  };
+  const res = await captureScreenshot({ url: "https://example.com", country: " de " }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, undefined, "lowercase country should be accepted");
+  assert.equal(new URL(calledUrl).searchParams.get("country"), "DE");
+  passed++;
+}
+
+// 10) A full country name is rejected up front — the API would silently fall back to a US proxy
+{
+  let fetched = false;
+  const fetchImpl = async () => {
+    fetched = true;
+    return fakeImageResponse(PNG);
+  };
+  const res = await captureScreenshot({ url: "https://example.com", country: "Germany" }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, true, "full country names must not be sent to the API");
+  assert.match(res.content[0].text, /ISO 3166-1 alpha-2/);
+  assert.match(res.content[0].text, /"DE"/, "error should show the correct code");
+  assert.equal(fetched, false, "should not call the API with an unusable country");
+  passed++;
+}
+
+// 11) strict_country can be turned off to keep the API's silent-fallback behaviour
+{
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(PNG);
+  };
+  await captureScreenshot(
+    { url: "https://example.com", country: "FR", strict_country: false },
+    { apiKey: "K", fetchImpl },
+  );
+  const u = new URL(calledUrl);
+  assert.equal(u.searchParams.get("country"), "FR");
+  assert.equal(u.searchParams.get("strict_country"), null, "opt-out drops strict_country");
+  passed++;
+}
+
+// 12) strict_country is meaningless without a country and must not be sent
+{
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(PNG);
+  };
+  await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
+  const u = new URL(calledUrl);
+  assert.equal(u.searchParams.get("country"), null);
+  assert.equal(u.searchParams.get("strict_country"), null);
+  passed++;
+}
+
+// 13) A strict-country rejection explains how to recover
+{
+  const fetchImpl = async () => fakeErrorResponse(400, JSON.stringify({ error: "country_unavailable" }));
+  const res = await captureScreenshot({ url: "https://example.com", country: "MC" }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /country_unavailable/);
+  assert.match(res.content[0].text, /strict_country/, "should suggest the opt-out");
+  passed++;
+}
+
+console.log(`ok — ${passed}/13 smoke checks passed`);

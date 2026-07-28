@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "site-shot-mcp",
   "display_name": "Site-Shot Screenshots",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Website screenshots for AI agents: real Chromium, full-page capture, country proxies, automatic ad & cookie-banner removal.",
   "long_description": "Official MCP server for the Site-Shot screenshot API. Gives Claude, Cursor, and other AI agents the ability to see any web page: real Chromium rendering, full-page (scrolling) capture up to 20,000 px, country-specific proxies with matching language/time zone/geolocation, and automatic ad + cookie-banner removal enabled by default for cleaner images and fewer vision tokens. Requires a Site-Shot API key; test output quality first with the free, no-signup browser tool at https://www.site-shot.com/.",
   "author": {

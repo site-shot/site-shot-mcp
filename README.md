@@ -42,12 +42,19 @@ Screenshot a web page (viewport by default).
 | `format` | `"png"` \| `"jpeg"` | `png` | Image format |
 | `block_ads` | boolean | `true` | Remove ads |
 | `block_cookie_banners` | boolean | `true` | Remove cookie-consent popups |
-| `country` | string | — | Proxy country, e.g. `"Germany"` (auto IP/lang/tz/geo) |
+| `country` | string | — | Proxy country as a two-letter [ISO 3166-1 alpha-2](https://www.site-shot.com/countries) code, e.g. `"DE"` (auto IP/lang/tz/geo) |
+| `strict_country` | boolean | `true` | Error out if the country has no proxy, instead of falling back to the US |
 | `language` / `time_zone` / `geolocation` | string | — | Manual overrides |
 | `wait_ms` | number | — | Wait before capture (SPAs/animations) |
 | `max_height` | number | 20000 (full page) | Cap captured height |
 
 Returns the screenshot as an MCP image.
+
+> **Country codes are ISO codes, never names.** Pass `"DE"`, not `"Germany"`. The API matches
+> codes exactly and would otherwise render through a US proxy without telling you, so the server
+> rejects full names before spending a render. `strict_country` (on by default) likewise turns an
+> unavailable country into an error instead of a silent US screenshot — pass `false` to opt back
+> into the fallback. [Supported countries →](https://www.site-shot.com/countries)
 
 ### `capture_full_page`
 Same as `capture_screenshot` with full-page capture enabled.
