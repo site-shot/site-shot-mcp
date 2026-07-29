@@ -32,7 +32,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     block_ads = true,
     block_cookie_banners = true,
     country,
-    strict_country = true,
+    strict_country,
     language,
     time_zone,
     geolocation,
@@ -58,20 +58,29 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     };
   }
 
+  // Not `strict_country = true` in the destructuring: a default only fills in for
+  // undefined, so an explicit null would read as falsy and silently drop us back to
+  // the US-fallback this whole branch exists to prevent. Only false opts out.
+  const strictCountry = strict_country !== false;
+
   // Site-Shot matches the country code exactly. Anything it doesn't recognise — a full
   // name like "Germany" — silently renders through a US proxy, which the caller can't
   // spot in the returned image, so reject unusable values before spending a render.
+  //
+  // typeof, never String(): String([]) is "", so coercing here would skip the whole
+  // branch for a non-string and drop the caller's country with no error at all.
   let countryCode;
-  if (country != null && String(country).trim() !== "") {
-    const rawCountry = String(country).trim();
-    if (!/^[A-Za-z]{2}$/.test(rawCountry)) {
+  const rawCountry = typeof country === "string" ? country.trim() : country;
+  if (rawCountry != null && rawCountry !== "") {
+    if (typeof rawCountry !== "string" || !/^[A-Za-z]{2}$/.test(rawCountry)) {
+      const shown = typeof rawCountry === "string" ? `"${rawCountry}"` : `a ${typeof country} value`;
       return {
         isError: true,
         content: [
           {
             type: "text",
             text:
-              `Invalid country: "${rawCountry}". Use a two-letter ISO 3166-1 alpha-2 code — ` +
+              `Invalid country: ${shown}. Use a two-letter ISO 3166-1 alpha-2 code — ` +
               `"DE" for Germany, "FR" for France, "JP" for Japan. Full country names are not ` +
               `accepted. Full list: https://www.site-shot.com/countries`,
           },
@@ -99,7 +108,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   if (countryCode) {
     params.set("country", countryCode);
     // Fail loudly rather than returning a US screenshot the caller believes is local.
-    if (strict_country) params.set("strict_country", "1");
+    if (strictCountry) params.set("strict_country", "1");
   }
   if (language) params.set("language", language);
   if (time_zone) params.set("time_zone", time_zone);
@@ -144,11 +153,16 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   } catch {
     /* keep status-only detail */
   }
-  if (/country_unavailable/i.test(detail)) {
+  // Gated on countryCode, not on the body alone: without it an unrelated error carrying
+  // this marker would interpolate `undefined` into text an agent reads back to a user.
+  if (countryCode && /country_unavailable/i.test(detail)) {
     detail +=
       ` — no proxy is available for country "${countryCode}". Pick another country ` +
-      `(https://www.site-shot.com/countries), or pass strict_country: false to render ` +
-      `through a US proxy instead.`;
+      `(https://www.site-shot.com/countries)`;
+    // Suggesting the opt-out to a caller who already passed it would just be noise.
+    detail += strictCountry
+      ? `, or pass strict_country: false to render through a US proxy instead.`
+      : `.`;
   }
   return {
     isError: true,
@@ -216,7 +230,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: "1.0.2",
+    version: "1.1.0",
   });
 
   server.registerTool(

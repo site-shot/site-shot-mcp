@@ -160,7 +160,9 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-// 11) strict_country can be turned off to keep the API's silent-fallback behaviour
+// 11) strict_country can be turned off to keep the API's silent-fallback behaviour.
+// Lower-case "fr" deliberately: opting out must still normalise the code, so this
+// fails against a build that has neither the opt-out nor the normalisation.
 {
   let calledUrl = "";
   const fetchImpl = async (url) => {
@@ -168,7 +170,7 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
     return fakeImageResponse(PNG);
   };
   await captureScreenshot(
-    { url: "https://example.com", country: "FR", strict_country: false },
+    { url: "https://example.com", country: "fr", strict_country: false },
     { apiKey: "K", fetchImpl },
   );
   const u = new URL(calledUrl);
@@ -177,28 +179,89 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-// 12) strict_country is meaningless without a country and must not be sent
+// 12) strict_country is meaningless without a country and must not be sent.
+// Passed explicitly here: this pins the `if (countryCode)` coupling, so moving the
+// strict_country write out of that block fails the test.
 {
   let calledUrl = "";
   const fetchImpl = async (url) => {
     calledUrl = url;
     return fakeImageResponse(PNG);
   };
-  await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
+  await captureScreenshot(
+    { url: "https://example.com", strict_country: true },
+    { apiKey: "K", fetchImpl },
+  );
   const u = new URL(calledUrl);
   assert.equal(u.searchParams.get("country"), null);
   assert.equal(u.searchParams.get("strict_country"), null);
   passed++;
 }
 
-// 13) A strict-country rejection explains how to recover
+// 13) A strict-country rejection names the country and explains how to recover.
+// The bare /country_unavailable/ match would pass on the raw API string alone, so the
+// assertions that matter are the country code and the opt-out hint.
 {
   const fetchImpl = async () => fakeErrorResponse(400, JSON.stringify({ error: "country_unavailable" }));
   const res = await captureScreenshot({ url: "https://example.com", country: "MC" }, { apiKey: "K", fetchImpl });
   assert.equal(res.isError, true);
-  assert.match(res.content[0].text, /country_unavailable/);
+  assert.match(res.content[0].text, /"MC"/, "should name the country that failed");
   assert.match(res.content[0].text, /strict_country/, "should suggest the opt-out");
   passed++;
 }
 
-console.log(`ok — ${passed}/13 smoke checks passed`);
+// 14) An explicit null must not read as "opt out" — a destructuring default only fills
+// in for undefined, so null would silently restore the US fallback.
+{
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(PNG);
+  };
+  await captureScreenshot(
+    { url: "https://example.com", country: "FR", strict_country: null },
+    { apiKey: "K", fetchImpl },
+  );
+  assert.equal(new URL(calledUrl).searchParams.get("strict_country"), "1", "only false opts out");
+  passed++;
+}
+
+// 15) A non-string country is rejected, not coerced. String([]) is "", which would
+// otherwise skip validation entirely and drop the country with no error.
+{
+  for (const bad of [[], ["DE"], 42, {}]) {
+    let fetched = false;
+    const fetchImpl = async () => {
+      fetched = true;
+      return fakeImageResponse(PNG);
+    };
+    const res = await captureScreenshot({ url: "https://example.com", country: bad }, { apiKey: "K", fetchImpl });
+    assert.equal(res.isError, true, `country ${JSON.stringify(bad)} should be rejected`);
+    assert.equal(fetched, false, "should not call the API with an unusable country");
+  }
+  passed++;
+}
+
+// 16) The recovery hint must not leak "undefined" when no country was ever requested
+{
+  const fetchImpl = async () => fakeErrorResponse(400, JSON.stringify({ error: "country_unavailable" }));
+  const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, true);
+  assert.doesNotMatch(res.content[0].text, /undefined/, "no undefined in agent-visible text");
+  passed++;
+}
+
+// 17) Don't suggest an opt-out the caller already took
+{
+  const fetchImpl = async () => fakeErrorResponse(400, JSON.stringify({ error: "country_unavailable" }));
+  const res = await captureScreenshot(
+    { url: "https://example.com", country: "MC", strict_country: false },
+    { apiKey: "K", fetchImpl },
+  );
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /"MC"/);
+  assert.doesNotMatch(res.content[0].text, /pass strict_country/, "already opted out");
+  passed++;
+}
+
+console.log(`ok — ${passed}/17 smoke checks passed`);
