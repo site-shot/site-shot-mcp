@@ -25,5 +25,18 @@ assert.match(
   "country param must document ISO codes, not full country names",
 );
 
+// The package forwards width/height/wait_ms only when the caller passes them, so the value
+// that applies otherwise belongs to the API and rots on its release cycle, not ours. Naming a
+// number here ships to agents as fact — which is how "default 1280" outlived being true. This
+// asserts on the served schema rather than the source, because the served schema is what agents
+// actually read.
+for (const p of ["width", "height", "wait_ms"]) {
+  assert.doesNotMatch(
+    cap.inputSchema.properties[p].description,
+    /[0-9]/,
+    `${p} description must not restate a default the package never sends`,
+  );
+}
+
 await client.close();
 console.log(`ok — MCP handshake + tools/list works. Tools: ${names.join(", ")}`);

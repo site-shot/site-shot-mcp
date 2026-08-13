@@ -38,17 +38,24 @@ Screenshot a web page (viewport by default).
 |---|---|---|---|
 | `url` | string (required) | — | Page to capture |
 | `full_page` | boolean | `false` | Capture the whole scrollable page |
-| `width` / `height` | number | 1280 / 1024 | Viewport / device size |
+| `width` / `height` | number | API default | Viewport / device size |
 | `format` | `"png"` \| `"jpeg"` | `png` | Image format |
 | `block_ads` | boolean | `true` | Remove ads |
 | `block_cookie_banners` | boolean | `true` | Remove cookie-consent popups |
 | `country` | string | — | Proxy country as a two-letter [ISO 3166-1 alpha-2](https://www.site-shot.com/countries) code, e.g. `"DE"` (auto IP/lang/tz/geo) |
 | `strict_country` | boolean | `true` | Error out if the country has no proxy, instead of falling back to the US |
 | `language` / `time_zone` / `geolocation` | string | — | Manual overrides |
-| `wait_ms` | number | — | Wait before capture (SPAs/animations) |
+| `wait_ms` | number | API default | Extra wait before capture (SPAs/animations) |
 | `max_height` | number | 20000 (full page) | Cap captured height |
 
 Returns the screenshot as an MCP image.
+
+> **"API default" is not a number this package gets to state.** `width`, `height` and `wait_ms`
+> are forwarded only when you pass them, so whatever applies when you don't is decided by the
+> Site-Shot API and can change without a release here. Versions up to 1.1.0 printed pixel sizes
+> for `width` / `height` that the API does not use — an agent that omitted them to take "the
+> default" got a different viewport, with nothing in the returned image to reveal it. Pass
+> explicit values whenever the size matters.
 
 > **Country codes are ISO codes, never names.** Pass `"DE"`, not `"Germany"`. The API matches
 > codes exactly and would otherwise render through a US proxy without telling you, so the server

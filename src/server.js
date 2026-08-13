@@ -176,8 +176,31 @@ const baseInputShape = {
     .string()
     .min(1)
     .describe("The URL of the web page to capture. A bare domain like example.com is accepted (https:// is assumed)."),
-  width: z.number().int().min(100).max(8000).optional().describe("Viewport width in pixels (default 1280)."),
-  height: z.number().int().min(100).max(20000).optional().describe("Viewport height in pixels (default 1024)."),
+  // No pixel default is named in these two descriptions on purpose. width and height are sent
+  // only when the caller passes them, so the value that applies when they don't is the API's to
+  // change without an npm release — while this string is read by agents as fact. Through 1.1.0
+  // it named a size the API does not use, so an agent that omitted width to take "the default"
+  // silently got a different viewport, with nothing in the returned image to show it.
+  width: z
+    .number()
+    .int()
+    .min(100)
+    .max(8000)
+    .optional()
+    .describe(
+      "Viewport width in pixels. If omitted, the Site-Shot API's own default applies — pass a " +
+        "value whenever the exact size matters.",
+    ),
+  height: z
+    .number()
+    .int()
+    .min(100)
+    .max(20000)
+    .optional()
+    .describe(
+      "Viewport height in pixels. If omitted, the Site-Shot API's own default applies — pass a " +
+        "value whenever the exact size matters.",
+    ),
   format: z.enum(["png", "jpeg"]).optional().describe("Image format. Default: png."),
   block_ads: z.boolean().optional().describe("Remove ads for a cleaner screenshot. Default: true."),
   block_cookie_banners: z
@@ -208,7 +231,13 @@ const baseInputShape = {
     .min(0)
     .max(30000)
     .optional()
-    .describe("Milliseconds to wait after load before capturing (for SPAs/animations)."),
+    // Same rule as width/height: the API's delay is its own to change, so no number here. The
+    // second sentence still earns its place — omitting this is not a zero-wait capture, and an
+    // agent that assumes it is will pass a needlessly large value to "add" a wait it already has.
+    .describe(
+      "Milliseconds to wait after load before capturing (for SPAs/animations). If omitted, the " +
+        "Site-Shot API applies its own delay — leaving this out is not a zero-wait capture.",
+    ),
   max_height: z
     .number()
     .int()
@@ -230,7 +259,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: "1.1.0",
+    version: "1.1.1",
   });
 
   server.registerTool(

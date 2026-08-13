@@ -264,4 +264,21 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/17 smoke checks passed`);
+// 18) Omitted sizing/delay params must not be sent at all. The tool schema tells agents the
+// API's own default applies when they leave these out; a destructuring default here would
+// quietly override it and turn that description into the same silent lie the 1280x1024 one was.
+{
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(PNG);
+  };
+  await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
+  const u = new URL(calledUrl);
+  assert.equal(u.searchParams.get("width"), null, "omitted width must not be sent");
+  assert.equal(u.searchParams.get("height"), null, "omitted height must not be sent");
+  assert.equal(u.searchParams.get("delay_time"), null, "omitted wait_ms must not be sent");
+  passed++;
+}
+
+console.log(`ok — ${passed}/18 smoke checks passed`);
