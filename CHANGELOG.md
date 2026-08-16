@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.2
+
+Documentation only — no behavior change.
+
+### Added
+
+- README: "Why call this server instead of the agent's own browser?" — when an
+  agent should delegate the capture and when it should drive its own browser,
+  linking the full comparison
+  (https://www.site-shot.com/blog/ai-agent-vs-screenshot-api/).
+
 ## 1.1.1
 
 Documentation only — no request the server makes has changed. What changed is

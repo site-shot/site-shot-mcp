@@ -66,6 +66,17 @@ Returns the screenshot as an MCP image.
 ### `capture_full_page`
 Same as `capture_screenshot` with full-page capture enabled.
 
+## Why call this server instead of the agent's own browser?
+
+If your agent drives a browser, it can screenshot pages itself — and for pages that must be signed
+into or stepped through a flow, that is the right tool. For public URLs, delegating the capture to
+this server is usually better engineering: every capture runs the same pipeline (no re-planning
+between runs), can be taken from a specific country with matching locale and time zone
+(`country` + `strict_country`), is scored by an image classifier with an escalating retry ladder
+behind it before being returned, and costs a fraction of a cent instead of a browser session plus
+vision tokens per look. The full comparison, both directions honestly argued:
+[AI agent vs. screenshot API — who should capture the page](https://www.site-shot.com/blog/ai-agent-vs-screenshot-api/).
+
 ## Configuration
 
 | Env var | Required | Description |
