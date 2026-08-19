@@ -8,7 +8,7 @@ Real Chromium rendering · full-page capture · country proxies · automatic **a
 
 ## Quick start (Claude Desktop)
 
-1. Get a Site-Shot API key at <https://www.site-shot.com/pricing/>.
+1. Get a Site-Shot API key at <https://www.site-shot.com/start/>.
 2. Add this to your Claude Desktop config (`claude_desktop_config.json`):
 
 ```json
