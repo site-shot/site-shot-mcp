@@ -13,13 +13,16 @@ country.
 ## Before the first capture
 
 Site-Shot requires a paid API plan; captures use that account's existing API allowance and limits.
-The key reaches the server as `SITESHOT_API_KEY`, and in Claude Code it is a required plugin
-setting the person fills in themselves with `/plugin configure site-shot@site-shot`.
+The key reaches the server as `SITESHOT_API_KEY`, and how it gets there is the host's business, not
+this skill's. In Claude Code it is a required plugin setting the person fills in themselves with
+`/plugin configure site-shot@site-shot`. Under Codex it is forwarded from the environment of the
+session Codex was started in, which the README explains how to set up.
 
 So there is never a reason to ask anyone for the key in conversation, to read it out of a file, or
 to go hunting for one. If the setup is incomplete — the capture tools are not available, or a call
-comes back saying the key is missing — stop, say the plugin still needs configuring, and point at
-that command. Do not sign anyone up or buy anything on their behalf.
+comes back saying the key is missing — stop and say which host-side step is still outstanding,
+naming the right one for the host you are running in. Do not sign anyone up or buy anything on
+their behalf.
 
 ## Capturing
 

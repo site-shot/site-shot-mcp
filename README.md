@@ -87,21 +87,58 @@ The plugin adds one skill (`site-shot:website-screenshots`) and the two capture 
 [below](#tools). It declares no hooks, no monitors and no scheduled capture jobs; the only process
 it launches is the declared stdio MCP server.
 
-## Codex CLI
+## Codex CLI (plugin)
 
-This repository does not ship a Codex plugin. Codex does have a portable plugin format — the
-[Agent Plugins](https://developers.openai.com/plugins/build/plugins) manifest (a root `plugin.json`
-alongside an `mcp.json`), supported in ChatGPT, Codex and the Codex CLI — and whether Site-Shot
-publishes one is a separate decision. What works today is connecting the existing stdio server by
-hand, per machine:
+This repository is also a Codex plugin marketplace. It installs the same plugin directory as Claude
+Code does — one shared skill, the same pinned `site-shot-mcp@1.1.2` over stdio — with its own
+manifest, because the two hosts wire the credential differently.
+
+### Install
 
 ```bash
-codex mcp add site-shot -- npx -y site-shot-mcp@1.1.2
+codex plugin marketplace add site-shot/site-shot-mcp
+codex plugin add site-shot@site-shot
 ```
 
-That writes the entry to `~/.codex/config.toml`. `codex mcp add --env KEY=VALUE` would store the key
-there in clear text; to keep it in your environment instead, set `env_vars`, the allow-list of
-variables Codex forwards to the server:
+Exercised against Codex CLI 0.147.0 on macOS (arm64). As with Claude Code, these resolve the
+marketplace from GitHub, so they work only once these manifests are on the public default branch;
+before that, point `codex plugin marketplace add` at a local checkout path instead.
+
+Installing is not the same as being configured, and neither is the same as a capture succeeding.
+Installation only puts the manifests in place. The server still needs the key below, and a capture
+still needs a Site-Shot plan with allowance left on it.
+
+### The API key
+
+Codex forwards the variable named in the plugin's descriptor:
+
+```json
+{ "command": "npx", "args": ["-y", "site-shot-mcp@1.1.2"], "env_vars": ["SITESHOT_API_KEY"] }
+```
+
+`env_vars` is an allow-list of names, not values: no key appears in this descriptor, in the command
+below, or in the manual `config.toml` entry further down. You provision the key in the environment
+of the session you start Codex from.
+
+macOS defaults to zsh, where `read -p` starts a coprocess rather than printing a prompt — and a
+`bash`-labelled code fence does not change the shell you paste into. Invoke bash explicitly:
+
+```bash
+bash -c 'read -r -s -p "Site-Shot API key: " SITESHOT_API_KEY && printf "\n" && export SITESHOT_API_KEY && exec codex'
+```
+
+`-s` keeps the key off the screen, nothing here puts it in argv, and the export is scoped to that
+child session instead of lingering in the shell you typed from.
+
+What this does not do is configure a Codex you start some other way. A desktop launcher or a remote
+session begins from its own environment, so it will run the server without a key until you provision
+one there too.
+
+### Manual MCP setup instead
+
+If you would rather not install the plugin, the same stdio server can be configured by hand. This is
+an **alternative to** the plugin, not an addition — run both and you have two configurations of one
+server. Pick one.
 
 ```toml
 [mcp_servers.site-shot]
@@ -110,8 +147,13 @@ args = ["-y", "site-shot-mcp@1.1.2"]
 env_vars = ["SITESHOT_API_KEY"]
 ```
 
-Export `SITESHOT_API_KEY` wherever you launch Codex, then check the entry with
-`codex mcp get site-shot`. The same caveat as above applies: unless the entry sets `cwd`, Codex
+`codex mcp add site-shot -- npx -y site-shot-mcp@1.1.2` writes that entry for you; add `env_vars`
+afterwards, since `codex mcp add --env KEY=VALUE` would store the key in the file in clear text.
+Check it with `codex mcp get site-shot`. If you already have an entry like this and now install the
+plugin, remove the manual one deliberately with `codex mcp remove site-shot` — nothing here edits
+your configuration for you.
+
+Either route, the caveat from the Claude Code section applies: unless the entry sets `cwd`, Codex
 starts the server from wherever you ran Codex, so running it inside this repo hits the same
 local-name collision.
 

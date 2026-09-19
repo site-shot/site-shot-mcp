@@ -7,3 +7,4 @@ server.json
 .mcpbignore
 .claude-plugin
 plugins
+.agents

@@ -30,6 +30,13 @@ const plugin = readJson(pluginDir, ".claude-plugin", "plugin.json");
 const mcp = readJson(pluginDir, ".mcp.json");
 const readme = read("README.md");
 
+// Codex installs the same plugin directory through its own marketplace and its own
+// manifest. The two hosts share everything except credential wiring: Claude Code
+// substitutes ${user_config.*}, Codex forwards a named variable from the session.
+const codexMarketplace = readJson(".agents", "plugins", "marketplace.json");
+const codexEntry = codexMarketplace.plugins?.[0];
+const codexPlugin = readJson(pluginDir, ".codex-plugin", "plugin.json");
+
 /** Every file under dir, as repo-relative POSIX paths. */
 function filesUnder(dir) {
   const out = [];
@@ -97,24 +104,150 @@ test("metadata is real and attributable, with no invented endorsements", () => {
   );
 });
 
-test("the MCP command stays pinned to the released npm package", () => {
-  const servers = mcp.mcpServers;
-  assert.ok(servers, ".mcp.json uses the documented mcpServers wrapper");
-  assert.deepEqual(Object.keys(servers), ["site-shot"], "one server, named for the brand");
+/**
+ * Both hosts launch the same released package over stdio; only the credential wiring
+ * differs. Asserted once so the two descriptors cannot drift apart unnoticed.
+ */
+function assertPinnedRelease(descriptor, label) {
+  const servers = descriptor.mcpServers;
+  assert.ok(servers, `${label}: uses the documented mcpServers wrapper`);
+  assert.deepEqual(Object.keys(servers), ["site-shot"], `${label}: one server, named for the brand`);
 
   const server = servers["site-shot"];
-  assert.equal(server.command, "npx");
-  assert.deepEqual(server.args, ["-y", `site-shot-mcp@${pkg.version}`], "pinned to this repo's version");
+  assert.equal(server.command, "npx", `${label}: launched through npx`);
+  assert.deepEqual(server.args, ["-y", `site-shot-mcp@${pkg.version}`], `${label}: pinned to this repo's version`);
 
   // A floating tag would let a future npm release change what installed users run,
   // with no commit here to review it.
-  const spec = server.args.at(-1);
-  assert.match(spec, /^site-shot-mcp@\d+\.\d+\.\d+$/, "exact version, never @latest or a range");
+  assert.match(server.args.at(-1), /^site-shot-mcp@\d+\.\d+\.\d+$/, `${label}: exact version, never @latest or a range`);
 
   // stdio is the only transport this package speaks; a url here would mean a remote
   // server that does not exist yet.
-  assert.equal(server.url, undefined, "no remote URL — the public HTTPS server is not built");
-  assert.equal(server.headers, undefined, "no HTTP headers: stdio server");
+  assert.equal(server.url, undefined, `${label}: no remote URL — the public HTTPS server is not built`);
+  assert.equal(server.headers, undefined, `${label}: no HTTP headers, stdio server`);
+  return server;
+}
+
+test("the MCP command stays pinned to the released npm package", () => {
+  assertPinnedRelease(mcp, "claude");
+});
+
+test("the Codex marketplace installs the same plugin directory", () => {
+  assert.equal(codexMarketplace.name, marketplace.name, "one brand name across both hosts");
+  assert.equal(codexMarketplace.plugins.length, 1, "exactly one plugin is offered");
+
+  // Codex's own contract: an explicit local source object plus install/auth policy —
+  // not Claude's bare string. A compatibility default would work until it stopped.
+  assert.deepEqual(
+    codexEntry.source,
+    { source: "local", path: "./plugins/site-shot" },
+    "native local source object, not a Claude-shaped string",
+  );
+  assert.deepEqual(
+    codexEntry.policy,
+    { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+    "install and auth policy stated explicitly",
+  );
+  assert.equal(codexEntry.category, "Developer Tools");
+
+  // Same directory as Claude's entry — compared after resolving each host's own shape,
+  // since the two manifests are not byte-identical and are not meant to be.
+  const dirOf = (s) => String(typeof s === "string" ? s : s.path).replace(/^\.\//, "");
+  assert.equal(dirOf(codexEntry.source), dirOf(entry.source), "both hosts install the same directory, not a copy");
+  assert.equal(dirOf(codexEntry.source), pluginDir);
+
+  assert.equal(codexEntry.name, codexPlugin.name, "entry name matches the manifest it points at");
+  assert.equal(codexPlugin.name, plugin.name, "the plugin has one name everywhere");
+  assert.equal(codexPlugin.version, pkg.version, "version tracks the package it installs");
+});
+
+test("the Codex manifest inlines its server map and shares the skill", () => {
+  // A `mcpServers` string path must resolve to `.mcp.json`, and that filename is already
+  // Claude's user_config descriptor. Inlining the map keeps one launch path per host
+  // without a second file competing for the same name.
+  assert.equal(typeof codexPlugin.mcpServers, "object", "server map is inline, not a path");
+  assert.ok(!Array.isArray(codexPlugin.mcpServers), "inline map is an object");
+  assert.throws(
+    () => statSync(join(repoRoot, pluginDir, ".codex-plugin", "mcp.json")),
+    /ENOENT/,
+    "no redundant nested descriptor left behind",
+  );
+  assert.deepEqual(
+    readdirSync(join(repoRoot, pluginDir, ".codex-plugin")),
+    ["plugin.json"],
+    ".codex-plugin holds only plugin.json, as the native layout expects",
+  );
+
+  // One skill folder, shared. A second copy would drift from the tools it documents.
+  assert.equal(codexPlugin.skills, "./skills/", "skills come from the shared folder");
+  assert.ok(
+    statSync(join(repoRoot, pluginDir, "skills", "website-screenshots", "SKILL.md")).isFile(),
+    "the shared skill is where both manifests point",
+  );
+
+  const allowedKeys = new Set([
+    "name", "version", "description", "author", "homepage", "repository",
+    "license", "keywords", "skills", "mcpServers", "interface",
+  ]);
+  for (const key of Object.keys(codexPlugin)) {
+    assert.ok(allowedKeys.has(key), `Codex manifest must not declare "${key}"`);
+  }
+  for (const key of ["hooks", "monitors", "scheduledTasks", "apps", "appTemplates"]) {
+    assert.equal(codexPlugin[key], undefined, `no ${key} in the Codex manifest`);
+  }
+});
+
+test("the Codex interface metadata is complete and claims nothing extra", () => {
+  const ui = codexPlugin.interface;
+  assert.ok(ui && typeof ui === "object" && !Array.isArray(ui), "interface is an object");
+
+  for (const field of ["displayName", "shortDescription", "longDescription", "developerName", "category"]) {
+    assert.equal(typeof ui[field], "string", `interface.${field} is a string`);
+    assert.ok(ui[field].trim().length > 0, `interface.${field} is non-empty`);
+  }
+  assert.equal(ui.category, codexEntry.category, "one category across manifest and marketplace entry");
+  assert.equal(ui.developerName, codexPlugin.author.name, "publisher name matches the author block");
+
+  assert.ok(
+    Array.isArray(ui.capabilities) && ui.capabilities.every((c) => typeof c === "string" && c.trim()),
+    "capabilities is an array of non-empty strings",
+  );
+  // The plugin returns images. It creates nothing on the user's machine, so claiming
+  // a write capability would overstate what installing it lets an agent do.
+  assert.ok(!ui.capabilities.includes("Write"), "no Write capability: this plugin writes nothing");
+
+  // The spec keeps at most three starter prompts, each capped at 128 characters;
+  // anything past that is silently dropped or truncated in the UI.
+  assert.ok(Array.isArray(ui.defaultPrompt), "defaultPrompt is an array");
+  assert.ok(ui.defaultPrompt.length > 0 && ui.defaultPrompt.length <= 3, "one to three starter prompts");
+  for (const prompt of ui.defaultPrompt) {
+    assert.ok(prompt.length <= 128, `starter prompt stays within 128 chars: "${prompt}"`);
+  }
+
+  const copy = JSON.stringify(ui);
+  assert.doesNotMatch(copy, /\bdirector(?:y|ies)\b|\bcatalog\b/i, "no claim of a directory listing");
+  assert.doesNotMatch(copy, /\bguarantee|\bfree (?:trial|tier|key|plan)\b/i, "no guarantee or free-tier claim");
+  assert.doesNotMatch(copy, /\bsigns? you in\b|\bauthenticates?\b|\blogs? in\b/i, "no authentication claim");
+});
+
+test("the Codex descriptor forwards the key by name and never borrows Claude's wiring", () => {
+  const server = assertPinnedRelease(codexPlugin, "codex");
+
+  assert.deepEqual(server.env_vars, ["SITESHOT_API_KEY"], "forwarded by name from the session environment");
+  assert.equal(server.env, undefined, "no literal env block — a value there would sit in the repo");
+
+  // ${user_config.*} is Claude Code's substitution. Codex does not implement it, so it
+  // would reach the server verbatim and be sent as the API key.
+  assert.doesNotMatch(JSON.stringify(codexPlugin.mcpServers), /user_config/, "no Claude interpolation in the Codex descriptor");
+  assert.equal(codexPlugin.userConfig, undefined, "no userConfig on the Codex manifest");
+
+  // And the reverse: Claude Code has no env_vars concept, so the key would never arrive.
+  assert.equal(mcp.mcpServers["site-shot"].env_vars, undefined, "env_vars stays Codex-only");
+  assert.match(
+    mcp.mcpServers["site-shot"].env.SITESHOT_API_KEY,
+    /^\$\{user_config\./,
+    "Claude keeps its own substitution",
+  );
 });
 
 test("the plugin asks Claude Code for the key as required sensitive config", () => {
@@ -165,10 +298,11 @@ test("the plugin ships only the files it declares — no hooks, no executables",
     shipped,
     [
       `${pluginDir}/.claude-plugin/plugin.json`,
+      `${pluginDir}/.codex-plugin/plugin.json`,
       `${pluginDir}/.mcp.json`,
       `${pluginDir}/skills/website-screenshots/SKILL.md`,
     ],
-    "plugin contents are exactly the manifest, the MCP config and one skill",
+    "plugin contents are exactly one manifest and MCP config per host, plus one shared skill",
   );
 
   // Hooks, bin/ and monitors run code on the user's machine on Claude Code's schedule
@@ -191,6 +325,11 @@ test("the plugin ships only the files it declares — no hooks, no executables",
   const mcpbignore = read(".mcpbignore").split("\n").map((l) => l.trim());
   assert.ok(mcpbignore.includes("plugins"), ".mcpbignore excludes plugins/");
   assert.ok(mcpbignore.includes(".claude-plugin"), ".mcpbignore excludes .claude-plugin/");
+  assert.ok(mcpbignore.includes(".agents"), ".mcpbignore excludes .agents/");
+
+  // The npm whitelist is unchanged by plugin work: the package ships the server, the
+  // marketplaces ship from git. Listing a plugin dir here would publish it twice.
+  assert.deepEqual(pkg.files, ["src", "README.md", "CHANGELOG.md", "LICENSE"], "npm files whitelist unchanged");
 });
 
 test("the skill only names tools and params the server actually serves", async () => {
@@ -245,6 +384,17 @@ test("the skill states the paid requirement and claims nothing it cannot do", ()
     skill.includes(`/plugin configure ${entry.name}@${marketplace.name}`),
     "the skill points at the real configure command",
   );
+
+  // One skill, two hosts. `/plugin configure` does not exist in Codex, so it has to be
+  // attributed rather than offered to whoever is reading.
+  const at = skill.indexOf("/plugin configure");
+  assert.match(
+    skill.slice(Math.max(0, at - 220), at + 60),
+    /Claude Code/,
+    "the configure command is attributed to Claude Code, not handed to every host",
+  );
+  assert.match(skill, /\bCodex\b/, "the other supported host is covered");
+  assert.match(skill, /\benvironment\b/i, "says where the key comes from under Codex");
   assert.doesNotMatch(skill, /prompts? for it when you enable/i, "no unobserved enable-time prompt claim");
   assert.doesNotMatch(
     skill,
@@ -426,6 +576,36 @@ test("README describes what the plugin runs, and what a missing key really does"
   assert.match(readme, /tools? return[^.]*error/i, "says what a missing key produces on that path");
 });
 
+test("README documents the native Codex install without a key on the command line", () => {
+  const repoSlug = pkg.repository.url.replace(/^git\+https:\/\/github\.com\//, "").replace(/\.git$/, "");
+  const codex = section("## Codex CLI");
+
+  assert.ok(codex.includes(`codex plugin marketplace add ${repoSlug}`), "native marketplace add, with the real slug");
+  assert.ok(
+    codex.includes(`codex plugin add ${codexEntry.name}@${codexMarketplace.name}`),
+    "installs <plugin>@<marketplace> exactly as the Codex manifests name them",
+  );
+  assert.ok(codex.includes(`site-shot-mcp@${pkg.version}`), "quotes the same pinned release the descriptor runs");
+  assert.match(codex, /0\.147/, "names the CLI version this was exercised against");
+
+  // The whole point of env_vars is that the value never appears in a command, argv or
+  // config literal. Documenting `KEY=value` anywhere here would undo that.
+  assert.doesNotMatch(codex, /SITESHOT_API_KEY=[A-Za-z0-9]/, "no key value in any documented command");
+  assert.match(codex, /\benvironment\b/i, "says the key is provisioned in the session environment");
+
+  // macOS defaults to zsh, where `read -p` starts a coprocess instead of prompting. A
+  // bash-labelled fence does not change the reader's shell, so the example must say bash.
+  assert.match(
+    codex,
+    /bash -c '[^']*\bread -r -s -p\b/,
+    "the key prompt runs under bash explicitly, not whatever shell the reader pastes into",
+  );
+
+  // Native plugin plus a manual `codex mcp add` entry are two configurations of one
+  // server. Users must pick, and nothing here should rewrite what they already have.
+  assert.match(codex, /\binstead\b|\bboth\b|\beither\b/i, "manual setup is an alternative, not an addition");
+});
+
 test("README is honest about where this is and is not distributed", () => {
   // The stdio package genuinely is on npm and in the MCP Registry — understating that
   // is as wrong as overstating the rest.
@@ -442,14 +622,22 @@ test("README is honest about where this is and is not distributed", () => {
   );
   assert.doesNotMatch(readme, /\b(?:app|client)[_ ]?id\b/i, "no invented registered application id");
 
-  // Codex has a portable plugin format; this repo just does not ship one yet.
+  // The repo now ships a native Codex plugin. Installing it from this marketplace is
+  // not the same as being admitted to the public ChatGPT/Codex directory.
   const codex = section("## Codex CLI");
-  assert.match(codex, /does not ship a Codex plugin/i, "manual stdio setup, not a wrapper we pretend to have");
-  assert.match(codex, /codex mcp add/, "gives the CLI command that was actually verified");
+  assert.match(codex, /codex plugin add/, "gives the native install command");
+  assert.match(codex, /\binstall\w*\b[^.]*\bnot\b[^.]*\bconfigured\b/i, "install, configured and capturing are distinguished");
 });
 
 test("copy does not imply per-capture charges or promise every page", () => {
-  const copy = [readme, JSON.stringify(marketplace), JSON.stringify(plugin), read(`${pluginDir}/skills/website-screenshots/SKILL.md`)];
+  const copy = [
+    readme,
+    JSON.stringify(marketplace),
+    JSON.stringify(plugin),
+    JSON.stringify(codexMarketplace),
+    JSON.stringify(codexPlugin),
+    read(`${pluginDir}/skills/website-screenshots/SKILL.md`),
+  ];
   for (const text of copy) {
     // A key draws on an account's existing API allowance; it is not a card charged per call,
     // and a failed capture is not automatically a paid one.

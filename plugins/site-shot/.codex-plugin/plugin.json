@@ -1,0 +1,36 @@
+{
+  "name": "site-shot",
+  "version": "1.1.2",
+  "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
+  "author": {
+    "name": "Site-Shot",
+    "email": "support@site-shot.com",
+    "url": "https://www.site-shot.com/"
+  },
+  "homepage": "https://www.site-shot.com/ai-agents/",
+  "repository": "https://github.com/site-shot/site-shot-mcp",
+  "license": "MIT",
+  "keywords": ["screenshot", "website-screenshot", "screenshot-api", "full-page", "ai-agents", "site-shot"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "site-shot": {
+      "command": "npx",
+      "args": ["-y", "site-shot-mcp@1.1.2"],
+      "env_vars": ["SITESHOT_API_KEY"]
+    }
+  },
+  "interface": {
+    "displayName": "Site-Shot Screenshots",
+    "shortDescription": "Screenshot public web pages, including from another country",
+    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. Requires a paid Site-Shot API plan; captures use that account's existing API allowance and limits.",
+    "developerName": "Site-Shot",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read"],
+    "websiteURL": "https://www.site-shot.com/",
+    "defaultPrompt": [
+      "Take a full-page screenshot of example.com.",
+      "Show me how this page renders from Germany.",
+      "Compare this page at mobile and desktop widths."
+    ]
+  }
+}

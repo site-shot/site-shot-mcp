@@ -1,0 +1,20 @@
+{
+  "name": "site-shot",
+  "interface": {
+    "displayName": "Site-Shot"
+  },
+  "plugins": [
+    {
+      "name": "site-shot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/site-shot"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
