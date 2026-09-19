@@ -1,0 +1,36 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "site-shot",
+  "description": "Site-Shot's own Claude Code plugin: website screenshots for agents, backed by the published site-shot-mcp server.",
+  "owner": {
+    "name": "Site-Shot",
+    "email": "support@site-shot.com",
+    "url": "https://www.site-shot.com/"
+  },
+  "plugins": [
+    {
+      "name": "site-shot",
+      "source": "./plugins/site-shot",
+      "displayName": "Site-Shot Screenshots",
+      "description": "Let Claude Code see public web pages: real Chromium rendering, full-page capture, country proxies, and automatic ad & cookie-banner removal. Runs the published site-shot-mcp package over stdio and requires a paid Site-Shot API plan.",
+      "version": "1.1.2",
+      "author": {
+        "name": "Site-Shot",
+        "email": "support@site-shot.com",
+        "url": "https://www.site-shot.com/"
+      },
+      "homepage": "https://www.site-shot.com/ai-agents/",
+      "repository": "https://github.com/site-shot/site-shot-mcp",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": [
+        "screenshot",
+        "website-screenshot",
+        "screenshot-api",
+        "full-page",
+        "ai-agents",
+        "site-shot"
+      ]
+    }
+  ]
+}

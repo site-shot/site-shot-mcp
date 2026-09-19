@@ -5,3 +5,5 @@ glama.json
 server.json
 *.mcpb
 .mcpbignore
+.claude-plugin
+plugins

@@ -1,12 +1,121 @@
 # Site-Shot MCP server
 
-Give Claude, Cursor, and other AI agents the ability to **see any web page** — take website screenshots
+Give Claude, Cursor, and other AI agents the ability to **see public web pages** — take website screenshots
 with [Site-Shot](https://www.site-shot.com/) over the [Model Context Protocol](https://modelcontextprotocol.io).
 
 Real Chromium rendering · full-page capture · country proxies · automatic **ad & cookie-banner removal**
 (cleaner images, fewer vision tokens).
 
-## Quick start (Claude Desktop)
+A Site-Shot API key is required, and it takes a paid Site-Shot API plan: captures draw on that
+account's existing API allowance and limits. The key comes from your
+[Site-Shot dashboard](https://www.site-shot.com/dashboard/); [pricing](https://www.site-shot.com/pricing/)
+lists the plans. The no-signup browser tool at <https://www.site-shot.com/> is for checking output
+quality; it does not issue keys.
+
+## Claude Code (plugin)
+
+This repository doubles as a Claude Code plugin marketplace. The plugin runs the published
+`site-shot-mcp` package over stdio and declares the API key as a required sensitive setting, so
+Claude Code prompts you for it rather than asking you to paste it into this repository, a config
+file, or a chat message.
+
+### Install
+
+```bash
+claude plugin marketplace add site-shot/site-shot-mcp
+claude plugin install site-shot@site-shot
+```
+
+or from inside a session:
+
+```
+/plugin marketplace add site-shot/site-shot-mcp
+/plugin install site-shot@site-shot
+```
+
+Both forms resolve the marketplace from GitHub, so they work only after these manifests are
+published on the repository's public default branch — not from a local branch or a fork you
+have not pushed.
+
+### Try it before that
+
+Load the plugin directory for a single session:
+
+```bash
+claude --plugin-dir /absolute/path/to/site-shot-mcp/plugins/site-shot
+```
+
+Two things matter here. Pass an **absolute** path — `--plugin-dir` is resolved against the session's
+working directory. And start that session from an ordinary project directory, **not from this
+checkout**: this repo *is* the `site-shot-mcp` package, so npm resolves the name locally, finds no
+linked binary, and the server dies with `sh: site-shot-mcp: command not found` before Claude Code
+ever sees it. From an unrelated directory `npx` fetches the published package and starts it
+normally — checked both ways: exit 127 in this checkout, clean stdio start from an empty one.
+
+To exercise the real install path instead — marketplace resolution, manifests and the required
+setting — add the checkout itself as a marketplace:
+
+```bash
+claude plugin marketplace add /absolute/path/to/site-shot-mcp
+claude plugin install site-shot@site-shot
+```
+
+That installs into your user scope; undo it with `claude plugin uninstall site-shot@site-shot` and
+`claude plugin marketplace remove site-shot`.
+
+### The API key
+
+The plugin declares `SITESHOT_API_KEY` as a required, sensitive setting. Claude Code prompts you for
+the key, masks it as you type, and substitutes it into the server's environment as
+`${user_config.SITESHOT_API_KEY}`. Storage of the value is Claude Code's to handle.
+
+Installing without one is not an error — Claude Code records it as still owed
+(`1 userConfig option not yet set (1 required)`). Supply it through the masked prompt:
+
+```
+/plugin configure site-shot@site-shot
+```
+
+Configure it before expecting a capture: that setting is what feeds the server its key. What Claude
+Code does while it is unset — whether the server is launched at all, whether the tools are offered —
+is Claude Code's own behaviour and is not something documented here from observation.
+
+The server's side is independent of that. When run directly over stdio **without a key**, it still
+starts and prints a warning on stderr. Capture tools return a clear missing-key error instead of an image.
+
+The plugin adds one skill (`site-shot:website-screenshots`) and the two capture tools
+[below](#tools). It declares no hooks, no monitors and no scheduled capture jobs; the only process
+it launches is the declared stdio MCP server.
+
+## Codex CLI
+
+This repository does not ship a Codex plugin. Codex does have a portable plugin format — the
+[Agent Plugins](https://developers.openai.com/plugins/build/plugins) manifest (a root `plugin.json`
+alongside an `mcp.json`), supported in ChatGPT, Codex and the Codex CLI — and whether Site-Shot
+publishes one is a separate decision. What works today is connecting the existing stdio server by
+hand, per machine:
+
+```bash
+codex mcp add site-shot -- npx -y site-shot-mcp@1.1.2
+```
+
+That writes the entry to `~/.codex/config.toml`. `codex mcp add --env KEY=VALUE` would store the key
+there in clear text; to keep it in your environment instead, set `env_vars`, the allow-list of
+variables Codex forwards to the server:
+
+```toml
+[mcp_servers.site-shot]
+command = "npx"
+args = ["-y", "site-shot-mcp@1.1.2"]
+env_vars = ["SITESHOT_API_KEY"]
+```
+
+Export `SITESHOT_API_KEY` wherever you launch Codex, then check the entry with
+`codex mcp get site-shot`. The same caveat as above applies: unless the entry sets `cwd`, Codex
+starts the server from wherever you ran Codex, so running it inside this repo hits the same
+local-name collision.
+
+## Claude Desktop & other MCP clients
 
 1. Get a Site-Shot API key at <https://www.site-shot.com/start/>.
 2. Add this to your Claude Desktop config (`claude_desktop_config.json`):
@@ -29,7 +138,15 @@ Real Chromium rendering · full-page capture · country proxies · automatic **a
 Works the same way in any MCP client (Cursor, Cline, VS Code, LangChain, CrewAI) — point the client at
 `npx -y site-shot-mcp` with `SITESHOT_API_KEY` in the environment.
 
+Every integration above runs the same local stdio server, and that package is published on npm and
+in the official MCP Registry. It is **not listed** in the shared ChatGPT/Codex public plugin
+directory or in Claude's remote connector directory: both of those routes take a hosted HTTPS MCP
+endpoint, which Site-Shot has not deployed. Doing so is a separate decision.
+
 ## Tools
+
+Two tools, both returning the screenshot as an MCP image. There is no saved library, no listing,
+no markdown conversion and no scheduling — this server captures images and hands them back.
 
 ### `capture_screenshot`
 Screenshot a web page (viewport by default).
@@ -90,8 +207,11 @@ separate backend.
 
 ```bash
 npm install
-npm run check   # syntax check
-npm run smoke   # offline tests (stubbed fetch, no API key needed)
+npm run check            # syntax check
+npm run smoke            # offline tests (stubbed fetch, no API key needed)
+node test/integration.mjs  # real stdio handshake against the local source
+npm run test:plugin      # plugin/marketplace metadata tests
+npm run validate:plugin  # claude plugin validate --strict (needs the claude CLI)
 SITESHOT_API_KEY=yourkey npm start   # run the server on stdio
 ```
 

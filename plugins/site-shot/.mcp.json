@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "site-shot": {
+      "command": "npx",
+      "args": ["-y", "site-shot-mcp@1.1.2"],
+      "env": {
+        "SITESHOT_API_KEY": "${user_config.SITESHOT_API_KEY}"
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "site-shot",
+  "displayName": "Site-Shot Screenshots",
+  "version": "1.1.2",
+  "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
+  "author": {
+    "name": "Site-Shot",
+    "email": "support@site-shot.com",
+    "url": "https://www.site-shot.com/"
+  },
+  "homepage": "https://www.site-shot.com/ai-agents/",
+  "repository": "https://github.com/site-shot/site-shot-mcp",
+  "license": "MIT",
+  "keywords": [
+    "screenshot",
+    "website-screenshot",
+    "screenshot-api",
+    "full-page",
+    "ai-agents",
+    "site-shot"
+  ],
+  "userConfig": {
+    "SITESHOT_API_KEY": {
+      "type": "string",
+      "title": "Site-Shot API key",
+      "description": "Your Site-Shot API key (sent to the API as userkey). Requires a paid Site-Shot API plan; captures use that account's existing API allowance and limits. Get the key from your Site-Shot dashboard (https://www.site-shot.com/dashboard/); plans are listed at https://www.site-shot.com/pricing/.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

@@ -20,7 +20,9 @@
   "scripts": {
     "start": "node src/index.js",
     "check": "node --check src/server.js && node --check src/index.js",
-    "smoke": "node test/smoke.mjs"
+    "smoke": "node test/smoke.mjs",
+    "test:plugin": "node --test test/plugin-metadata.test.mjs",
+    "validate:plugin": "claude plugin validate --strict . && claude plugin validate --strict plugins/site-shot"
   },
   "keywords": [
     "mcp",
