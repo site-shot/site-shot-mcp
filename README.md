@@ -271,7 +271,9 @@ stdio server above is the only supported way to use this package today.
 
 What it is: one Unix-domain socket serving `POST /mcp` with the same two tools and
 the same capture code as stdio. It binds no TCP port. Each POST gets a fresh
-`McpServer` and a stateless `StreamableHTTPServerTransport`, so nothing — key,
+`McpServer` and a stateless `WebStandardStreamableHTTPServerTransport` — the SDK's
+web-standard class, chosen because it returns a `Response` the worker can measure
+against its output budget instead of writing straight to the socket. Nothing — key,
 subject, cancellation — is shared between two requests.
 
 **It is not an authentication boundary.** Filesystem access to the socket is the
@@ -321,11 +323,16 @@ notification at the protocol level and nothing more. The only real cancellation 
 hanging up the original connection, or the deadline.
 
 Failures are classified, never quoted: the request URL contains `userkey`, so no
-upstream body, exception text, stack or URL is returned or logged. Results carry a
-stable code (`deadline_exceeded`, `client_cancelled`, `upstream_unreachable`,
-`upstream_error`, `country_unavailable`, `response_too_large`,
-`response_unreadable`, `invalid_url`, `invalid_country`) in the message text and
-in `_meta`.
+upstream body, exception text, stack or URL is returned or logged. Nor is anything
+the caller sent — a rejected URL can carry credentials. Results carry a stable code
+in the message text and in `_meta`; the full set is `missing_api_key`,
+`invalid_url`, `invalid_country`, `deadline_exceeded`, `client_cancelled`,
+`upstream_unreachable`, `upstream_error`, `country_unavailable`,
+`response_too_large`, `response_unreadable` and `unsupported_image_type`.
+
+Only `image/png` and `image/jpeg` are served. Any other type the API answers with
+is an `unsupported_image_type` error rather than a screenshot, and the subtype is
+not repeated back.
 
 ## Requirements
 
