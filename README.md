@@ -248,14 +248,84 @@ separate backend.
 ## Local development
 
 ```bash
-npm install
+npm ci                   # exact pinned dependencies
+npm test                 # syntax + smoke + plugin metadata + remote transport + stdio handshake
 npm run check            # syntax check
-npm run smoke            # offline tests (stubbed fetch, no API key needed)
-node test/integration.mjs  # real stdio handshake against the local source
+npm run smoke            # offline capture tests (injected fetch, no API key needed)
+npm run test:remote      # offline UDS transport tests (real sockets, injected fetch)
+npm run test:stdio       # real stdio handshake against the local source
 npm run test:plugin      # plugin/marketplace metadata tests
 npm run validate:plugin  # claude plugin validate --strict (needs the claude CLI)
 SITESHOT_API_KEY=yourkey npm start   # run the server on stdio
 ```
+
+No test reaches the network or needs a key: `fetch` is injected everywhere and the
+socket tests run against real Unix-domain sockets in a temporary directory.
+
+### Private UDS worker (development only)
+
+`src/uds-worker.js` is an **unreleased, private** transport for a future hosted
+Site-Shot MCP. It is not part of the published npm package's supported surface, it
+is not a remote endpoint, and there is no hosted server to point a client at. The
+stdio server above is the only supported way to use this package today.
+
+What it is: one Unix-domain socket serving `POST /mcp` with the same two tools and
+the same capture code as stdio. It binds no TCP port. Each POST gets a fresh
+`McpServer` and a stateless `StreamableHTTPServerTransport`, so nothing — key,
+subject, cancellation — is shared between two requests.
+
+**It is not an authentication boundary.** Filesystem access to the socket is the
+entire trust model: the worker believes the request context it reads there because
+only a permitted local peer can open that socket. A future Django adapter is what
+terminates OAuth, validates the token and synthesises that context from server
+state. That adapter does not exist yet, so nothing here is reachable from the
+internet and no OAuth claim is made.
+
+Per request, the adapter sends exactly three headers, each once:
+
+| Header | Meaning |
+|---|---|
+| `x-siteshot-subject` | Stable subject id for the account |
+| `x-siteshot-api-key` | That account's current Site-Shot API key, for this request only |
+| `x-siteshot-correlation-id` | Adapter-generated id; the only context value the worker logs |
+
+`Authorization`, `Cookie`, `Origin`, `Mcp-Session-Id` and `X-Forwarded-*` are
+rejected outright — a public credential arriving here means something is
+forwarding a public request verbatim. `GET` (SSE streaming), `DELETE` and any
+other path are refused explicitly rather than downgraded. The worker never reads
+`SITESHOT_API_KEY`; a key in its environment stays unused.
+
+Every bound is required, with no defaults — the package will not invent a budget
+on an operator's behalf, and startup fails if one is missing:
+
+| Variable | Meaning |
+|---|---|
+| `SITESHOT_MCP_UDS_PATH` | Absolute socket path, in a directory this process owns and that is not group- or world-writable |
+| `SITESHOT_MCP_UDS_MODE` | Octal socket mode; `0600` local, `0660` with a shared group |
+| `SITESHOT_MCP_UDS_GROUP` | Numeric gid — **required** when the mode grants group access, and verified after binding |
+| `SITESHOT_MCP_ALLOWED_HOSTS` | Comma-separated `Host` allow-list |
+| `SITESHOT_MCP_MAX_REQUEST_BYTES` | Ceiling on the incoming JSON-RPC body |
+| `SITESHOT_MCP_MAX_IMAGE_BYTES` | Ceiling on the captured image bytes |
+| `SITESHOT_MCP_MAX_RESPONSE_BYTES` | Ceiling on the **whole HTTP response** — status line, headers and body. Base64 adds a third on top of the image, plus the JSON-RPC envelope. Must fit `tools/list` with both schemas (~3 KiB), or every listing is refused |
+| `SITESHOT_MCP_MAX_ERROR_BODY_BYTES` | How much of a non-image response is read to classify it |
+| `SITESHOT_MCP_MAX_CONCURRENT_REQUESTS` | Active requests; there is no queue, an over-limit request is refused |
+| `SITESHOT_MCP_CAPTURE_TIMEOUT_MS` | Overall capture deadline |
+| `SITESHOT_MCP_REQUEST_BODY_TIMEOUT_MS` | Deadline for receiving the request body |
+
+Cancellation, stated precisely: the capture deadline stays armed until the image
+or error body has been fully consumed, and a caller that disconnects aborts the
+render fetch and the body read. A **separate** `notifications/cancelled` POST
+cannot cancel an earlier request — each POST is its own SDK `Protocol` instance
+and its cancellation map is instance-local. The worker acknowledges such a
+notification at the protocol level and nothing more. The only real cancellation is
+hanging up the original connection, or the deadline.
+
+Failures are classified, never quoted: the request URL contains `userkey`, so no
+upstream body, exception text, stack or URL is returned or logged. Results carry a
+stable code (`deadline_exceeded`, `client_cancelled`, `upstream_unreachable`,
+`upstream_error`, `country_unavailable`, `response_too_large`,
+`response_unreadable`, `invalid_url`, `invalid_country`) in the message text and
+in `_meta`.
 
 ## Requirements
 

@@ -12,7 +12,9 @@ async function main() {
     );
   }
 
-  const server = createServer();
+  // The environment key is resolved here and nowhere else. createServer() takes
+  // an explicit key so the remote worker cannot inherit this process's one.
+  const server = createServer({ apiKey: process.env.SITESHOT_API_KEY });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write("[site-shot-mcp] Site-Shot MCP server running on stdio.\n");

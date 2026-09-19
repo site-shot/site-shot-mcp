@@ -1,26 +1,174 @@
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+// The handshake version is read from the manifest rather than restated here: the
+// two drifted apart once already (package 1.1.2 against a 1.1.1 handshake), and a
+// version an agent reads is exactly the kind of claim that must not be hand-kept.
+const { version: SERVER_VERSION } = createRequire(import.meta.url)("../package.json");
+
 const API_BASE = "https://api.site-shot.com/";
 const REQUEST_TIMEOUT_MS = 90_000; // Site-Shot renders can take up to ~70s on heavy pages.
+// How much of a non-image response we are willing to look at to classify it. We
+// never return this text, so the cap only bounds the read, never the meaning.
+const ERROR_BODY_LIMIT_BYTES = 64 * 1024;
+
+/** Stable, agent- and log-safe classification for everything that can go wrong. */
+export const CAPTURE_ERROR_CODES = Object.freeze({
+  missingApiKey: "missing_api_key",
+  invalidUrl: "invalid_url",
+  invalidCountry: "invalid_country",
+  deadlineExceeded: "deadline_exceeded",
+  clientCancelled: "client_cancelled",
+  upstreamUnreachable: "upstream_unreachable",
+  upstreamError: "upstream_error",
+  countryUnavailable: "country_unavailable",
+  responseTooLarge: "response_too_large",
+  responseUnreadable: "response_unreadable",
+  unsupportedImageType: "unsupported_image_type",
+});
+
+/**
+ * The only MIME types a capture may come back as.
+ *
+ * Both tools offer exactly two formats, so these are the two types that can be a
+ * legitimate answer. Copying the upstream Content-Type through instead would put
+ * an arbitrary upstream string into the MCP result, and would accept
+ * `image/svg+xml` — active content the caller never asked for, handed to whatever
+ * renders the result. `image/jpg` is a common alias but is deliberately absent:
+ * nothing here has observed the API sending it, and an unverified alias is a
+ * guess. A real capture should confirm the exact types before any is added.
+ */
+const SERVED_IMAGE_TYPES = Object.freeze(["image/png", "image/jpeg"]);
+
+/**
+ * A tool error carrying a stable machine-readable code.
+ *
+ * The code also appears in the text because that is the part an agent actually
+ * reads; `_meta` is for the adapter and the logs. Neither ever carries upstream
+ * body text, the request URL, or the key that URL contains.
+ */
+function captureError(code, text, extra = {}) {
+  return {
+    isError: true,
+    content: [{ type: "text", text }],
+    _meta: { "com.site-shot.mcp/error": { code, ...extra } },
+  };
+}
+
+function abortError(reason) {
+  const err = new Error(reason);
+  err.name = "AbortError";
+  return err;
+}
+
+/**
+ * A promise that rejects when `signal` aborts, so a read can be abandoned even
+ * if the underlying stream would never notice the abort by itself.
+ */
+function rejectOnAbort(signal) {
+  let cancel = () => {};
+  const promise = new Promise((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(abortError("aborted"));
+      return;
+    }
+    const onAbort = () => reject(abortError("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    cancel = () => signal.removeEventListener("abort", onAbort);
+  });
+  // The loop below may finish before the signal ever fires; without this the
+  // late rejection would surface as an unhandled rejection.
+  promise.catch(() => {});
+  return { promise, cancel };
+}
+
+/**
+ * Read a response body under a byte ceiling and a live abort signal.
+ *
+ * `mode` is the whole point of the function:
+ *  - "reject"   — an over-sized body is a failure. Used for the image, where a
+ *                 truncated buffer would be a corrupt screenshot presented as a
+ *                 good one.
+ *  - "truncate" — stop at the ceiling and cancel the rest. Used for a non-image
+ *                 body we only inspect for a known marker and never return.
+ */
+async function readBoundedBody(res, { limit, signal, mode }) {
+  // A body that is not a readable stream cannot be bounded or aborted. There is
+  // deliberately no buffer-the-whole-thing fallback: it would be a second, weaker
+  // path through the one function whose entire job is enforcing the first.
+  if (!res.body || typeof res.body.getReader !== "function") {
+    throw new TypeError("capture response has no readable body stream");
+  }
+  {
+    const reader = res.body.getReader();
+    const abort = signal ? rejectOnAbort(signal) : null;
+    const chunks = [];
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = abort ? await Promise.race([reader.read(), abort.promise]) : await reader.read();
+        if (done) break;
+        const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+        if (limit != null && total + chunk.byteLength > limit) {
+          if (mode === "truncate") {
+            chunks.push(chunk.subarray(0, limit - total));
+            total = limit;
+            await reader.cancel().catch(() => {});
+            return { bytes: Buffer.concat(chunks, total), truncated: true };
+          }
+          await reader.cancel().catch(() => {});
+          return { overLimit: true, total: total + chunk.byteLength };
+        }
+        chunks.push(chunk);
+        total += chunk.byteLength;
+      }
+      return { bytes: Buffer.concat(chunks, total), truncated: false };
+    } catch (err) {
+      // An abort must actually stop the upstream transfer, not just stop us
+      // looking at it: cancel the reader before the failure propagates.
+      await reader.cancel().catch(() => {});
+      throw err;
+    } finally {
+      abort?.cancel();
+      try {
+        reader.releaseLock();
+      } catch {
+        /* already released by cancel() */
+      }
+    }
+  }
+}
 
 /**
  * Map friendly tool params to Site-Shot API query params and capture a screenshot.
- * Returns an MCP tool result ({ content, isError? }).
+ * Returns an MCP tool result ({ content, isError?, _meta? }).
+ *
+ * @param {object} args Tool arguments.
+ * @param {object} opts
+ * @param {string} opts.apiKey       The key for *this* call. Never read from the environment here.
+ * @param {function} opts.fetchImpl  fetch implementation.
+ * @param {AbortSignal} [opts.signal] Caller cancellation (the SDK request signal on the remote path).
+ * @param {number} [opts.timeoutMs]  Overall capture deadline, armed until the body is fully consumed.
+ * @param {number} [opts.maxImageBytes] Hard ceiling on returned image bytes. Omitted = unbounded (stdio).
+ * @param {number} [opts.maxErrorBodyBytes] Ceiling on the non-image body we inspect to classify a failure.
  */
-export async function captureScreenshot(args, { apiKey, fetchImpl }) {
+export async function captureScreenshot(args, opts) {
+  const {
+    apiKey,
+    fetchImpl,
+    signal: callerSignal,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+    maxImageBytes,
+    maxErrorBodyBytes = ERROR_BODY_LIMIT_BYTES,
+  } = opts;
+
   if (!apiKey) {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text:
-            "Missing Site-Shot API key. Set the SITESHOT_API_KEY environment variable " +
-            "(get a key at https://www.site-shot.com/pricing/).",
-        },
-      ],
-    };
+    return captureError(
+      CAPTURE_ERROR_CODES.missingApiKey,
+      "Missing Site-Shot API key. Set the SITESHOT_API_KEY environment variable " +
+        "(get a key at https://www.site-shot.com/pricing/).",
+    );
   }
 
   const {
@@ -47,15 +195,15 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   try {
     new URL(url);
   } catch {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: `Invalid URL: "${rawUrl}". Pass a web page URL such as https://example.com (a bare domain like example.com also works).`,
-        },
-      ],
-    };
+    // The rejected value is deliberately not quoted back: a URL can carry
+    // userinfo credentials ("https://user:secret@host"), and an error message is
+    // copied into results, transcripts and logs far more freely than a request is.
+    return captureError(
+      CAPTURE_ERROR_CODES.invalidUrl,
+      `Invalid URL (${CAPTURE_ERROR_CODES.invalidUrl}): pass a web page URL such as https://example.com — a bare ` +
+        `domain like example.com also works. The value you sent is not repeated here, because a URL can contain ` +
+        `credentials; check the url argument.`,
+    );
   }
 
   // Not `strict_country = true` in the destructuring: a default only fills in for
@@ -73,19 +221,14 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   const rawCountry = typeof country === "string" ? country.trim() : country;
   if (rawCountry != null && rawCountry !== "") {
     if (typeof rawCountry !== "string" || !/^[A-Za-z]{2}$/.test(rawCountry)) {
-      const shown = typeof rawCountry === "string" ? `"${rawCountry}"` : `a ${typeof country} value`;
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text:
-              `Invalid country: ${shown}. Use a two-letter ISO 3166-1 alpha-2 code — ` +
-              `"DE" for Germany, "FR" for France, "JP" for Japan. Full country names are not ` +
-              `accepted. Full list: https://www.site-shot.com/countries`,
-          },
-        ],
-      };
+      // Same rule as the URL above: say what is wrong and what to send instead,
+      // and describe the rejected value by type rather than quoting it back.
+      return captureError(
+        CAPTURE_ERROR_CODES.invalidCountry,
+        `Invalid country (${CAPTURE_ERROR_CODES.invalidCountry}): received a ${typeof country} value that is not a ` +
+          `two-letter ISO 3166-1 alpha-2 code — "DE" for Germany, "FR" for France, "JP" for Japan. Full country ` +
+          `names are not accepted. Full list: https://www.site-shot.com/countries`,
+      );
     }
     countryCode = rawCountry.toUpperCase();
   }
@@ -115,59 +258,145 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   if (geolocation) params.set("geolocation", geolocation);
   if (wait_ms != null) params.set("delay_time", String(wait_ms));
 
+  // This string contains the key. It must never reach a result, a log or an
+  // exception message — which is why nothing below ever interpolates an error.
   const endpoint = `${API_BASE}?${params.toString()}`;
 
+  // One controller for the whole capture. The deadline stays armed through the
+  // image or error body, not just the headers: a render that streams one byte
+  // and stalls used to hold the request open forever.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let res;
-  try {
-    res = await fetchImpl(endpoint, { signal: controller.signal });
-  } catch (err) {
-    clearTimeout(timer);
-    const reason = err?.name === "AbortError" ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s` : String(err);
-    return { isError: true, content: [{ type: "text", text: `Site-Shot request failed: ${reason}` }] };
-  }
-  clearTimeout(timer);
-
-  const contentType = (res.headers?.get?.("content-type") || "").toLowerCase();
-
-  // Success path: the API returns the image bytes directly.
-  if (res.ok && contentType.startsWith("image/")) {
-    const buf = Buffer.from(await res.arrayBuffer());
-    const mimeType = contentType.split(";")[0] || (format === "jpeg" ? "image/jpeg" : "image/png");
-    return {
-      content: [{ type: "image", data: buf.toString("base64"), mimeType }],
-    };
-  }
-
-  // Error path: surface whatever the API said (often a JSON or text error body).
-  let detail = `HTTP ${res.status}`;
-  try {
-    const text = await res.text();
-    try {
-      const json = JSON.parse(text);
-      detail = json.error || json.message || text || detail;
-    } catch {
-      detail = text || detail;
-    }
-  } catch {
-    /* keep status-only detail */
-  }
-  // Gated on countryCode, not on the body alone: without it an unrelated error carrying
-  // this marker would interpolate `undefined` into text an agent reads back to a user.
-  if (countryCode && /country_unavailable/i.test(detail)) {
-    detail +=
-      ` — no proxy is available for country "${countryCode}". Pick another country ` +
-      `(https://www.site-shot.com/countries)`;
-    // Suggesting the opt-out to a caller who already passed it would just be noise.
-    detail += strictCountry
-      ? `, or pass strict_country: false to render through a US proxy instead.`
-      : `.`;
-  }
-  return {
-    isError: true,
-    content: [{ type: "text", text: `Site-Shot could not capture the screenshot: ${detail}` }],
+  let abortCause = null; // "deadline" | "cancelled", whichever fires first.
+  const abortWith = (cause) => {
+    if (abortCause) return;
+    abortCause = cause;
+    controller.abort(abortError(cause));
   };
+
+  const onCallerAbort = () => abortWith("cancelled");
+  if (callerSignal) {
+    if (callerSignal.aborted) abortWith("cancelled");
+    else callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+  }
+  const timer = setTimeout(() => abortWith("deadline"), timeoutMs);
+
+  /** Turn any thrown failure into a safe, distinguishable classification. */
+  const classifyFailure = () => {
+    if (abortCause === "deadline") {
+      return captureError(
+        CAPTURE_ERROR_CODES.deadlineExceeded,
+        `Site-Shot could not capture the screenshot (${CAPTURE_ERROR_CODES.deadlineExceeded}): the capture ` +
+          `did not complete within ${Math.round(timeoutMs / 1000)}s. The render may still have been started.`,
+      );
+    }
+    if (abortCause === "cancelled") {
+      return captureError(
+        CAPTURE_ERROR_CODES.clientCancelled,
+        `Site-Shot capture cancelled (${CAPTURE_ERROR_CODES.clientCancelled}): the caller disconnected or ` +
+          `cancelled before the capture finished. The render may still have been started.`,
+      );
+    }
+    return captureError(
+      CAPTURE_ERROR_CODES.upstreamUnreachable,
+      `Site-Shot could not capture the screenshot (${CAPTURE_ERROR_CODES.upstreamUnreachable}): the Site-Shot ` +
+        `API could not be reached.`,
+    );
+  };
+
+  try {
+    let res;
+    try {
+      res = await fetchImpl(endpoint, { signal: controller.signal });
+    } catch {
+      // Deliberately not String(err): a fetch failure message routinely quotes
+      // the request URL, and the request URL carries `userkey`.
+      return classifyFailure();
+    }
+
+    const contentType = (res.headers?.get?.("content-type") || "").toLowerCase();
+
+    // Success path: the API returns the image bytes directly.
+    if (res.ok && contentType.startsWith("image/")) {
+      const mimeType = contentType.split(";")[0].trim();
+      if (!SERVED_IMAGE_TYPES.includes(mimeType)) {
+        // The subtype is not repeated back: it is upstream-controlled text, and
+        // this is exactly the path where it would be copied into a result.
+        return captureError(
+          CAPTURE_ERROR_CODES.unsupportedImageType,
+          `Site-Shot could not return the screenshot (${CAPTURE_ERROR_CODES.unsupportedImageType}): the API ` +
+            `answered with an image type this server does not serve. Only PNG and JPEG are returned — request ` +
+            `format: "png" or format: "jpeg".`,
+        );
+      }
+      let read;
+      try {
+        read = await readBoundedBody(res, { limit: maxImageBytes, signal: controller.signal, mode: "reject" });
+      } catch {
+        if (abortCause) return classifyFailure();
+        // An interrupted image read is a failure, never a shorter screenshot.
+        return captureError(
+          CAPTURE_ERROR_CODES.responseUnreadable,
+          `Site-Shot could not capture the screenshot (${CAPTURE_ERROR_CODES.responseUnreadable}): the image ` +
+            `response ended before it was complete.`,
+        );
+      }
+      if (read.overLimit) {
+        return captureError(
+          CAPTURE_ERROR_CODES.responseTooLarge,
+          `Site-Shot could not return the screenshot (${CAPTURE_ERROR_CODES.responseTooLarge}): the image is ` +
+            `larger than this server's ${maxImageBytes}-byte limit. Capture a smaller region — lower ` +
+            `max_height, or use jpeg instead of png.`,
+          { limitBytes: maxImageBytes },
+        );
+      }
+      return { content: [{ type: "image", data: read.bytes.toString("base64"), mimeType }] };
+    }
+
+    // Error path. The body is read only to recognise the one marker we have a
+    // safe meaning for; none of it is ever returned or logged.
+    const status = typeof res.status === "number" ? res.status : 0;
+    let countryUnavailable = false;
+    try {
+      const read = await readBoundedBody(res, {
+        limit: maxErrorBodyBytes,
+        signal: controller.signal,
+        mode: "truncate",
+      });
+      countryUnavailable = /country_unavailable/i.test(read.bytes.toString("utf8"));
+    } catch {
+      if (abortCause) return classifyFailure();
+      return captureError(
+        CAPTURE_ERROR_CODES.responseUnreadable,
+        `Site-Shot could not capture the screenshot (${CAPTURE_ERROR_CODES.responseUnreadable}): the API ` +
+          `returned HTTP ${status} and the response could not be read.`,
+        { httpStatus: status },
+      );
+    }
+
+    // Gated on countryCode, not on the body alone: without it an unrelated error carrying
+    // this marker would interpolate `undefined` into text an agent reads back to a user.
+    if (countryCode && countryUnavailable) {
+      let text =
+        `Site-Shot could not capture the screenshot (${CAPTURE_ERROR_CODES.countryUnavailable}): no proxy is ` +
+        `available for country "${countryCode}". Pick another country ` +
+        `(https://www.site-shot.com/countries)`;
+      // Suggesting the opt-out to a caller who already passed it would just be noise.
+      text += strictCountry
+        ? `, or pass strict_country: false to render through a US proxy instead.`
+        : `.`;
+      return captureError(CAPTURE_ERROR_CODES.countryUnavailable, text, { httpStatus: status });
+    }
+
+    return captureError(
+      CAPTURE_ERROR_CODES.upstreamError,
+      `Site-Shot could not capture the screenshot (${CAPTURE_ERROR_CODES.upstreamError}): the API returned ` +
+        `HTTP ${status}.`,
+      { httpStatus: status },
+    );
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", onCallerAbort);
+  }
 }
 
 // Shared input schema (zod raw shape) for both tools.
@@ -249,17 +478,25 @@ const baseInputShape = {
 
 /**
  * Build the Site-Shot MCP server.
+ *
+ * The key is always passed in, never read from the environment here. Resolving
+ * `SITESHOT_API_KEY` is the stdio entrypoint's job: on the remote path the key
+ * belongs to one request, and a factory that could quietly fall back to a
+ * process-wide key would be one missing header away from capturing on the wrong
+ * account.
+ *
  * @param {object} [opts]
- * @param {string} [opts.apiKey] Site-Shot API key (defaults to process.env.SITESHOT_API_KEY).
+ * @param {string} [opts.apiKey] Site-Shot API key for every call this server serves.
  * @param {function} [opts.fetchImpl] fetch implementation (defaults to global fetch) — injectable for tests.
+ * @param {object} [opts.capture] Per-call capture limits: { timeoutMs, maxImageBytes, maxErrorBodyBytes }.
  */
 export function createServer(opts = {}) {
-  const apiKey = opts.apiKey ?? process.env.SITESHOT_API_KEY;
+  const { apiKey, capture = {} } = opts;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
   const server = new McpServer({
     name: "site-shot",
-    version: "1.1.1",
+    version: SERVER_VERSION,
   });
 
   server.registerTool(
@@ -278,7 +515,9 @@ export function createServer(opts = {}) {
           .describe("Capture the entire scrollable page instead of just the viewport. Default: false."),
       },
     },
-    (args) => captureScreenshot(args, { apiKey, fetchImpl }),
+    // `extra.signal` is the SDK's per-request cancellation. Passing it through is
+    // what lets a caller hanging up actually stop the render fetch mid-body.
+    (args, extra) => captureScreenshot(args, { apiKey, fetchImpl, signal: extra?.signal, ...capture }),
   );
 
   server.registerTool(
@@ -290,7 +529,8 @@ export function createServer(opts = {}) {
         "it as an image. Convenience wrapper around capture_screenshot with full-page capture enabled.",
       inputSchema: baseInputShape,
     },
-    (args) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl }),
+    (args, extra) =>
+      captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal, ...capture }),
   );
 
   return server;

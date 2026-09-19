@@ -1,22 +1,15 @@
 import assert from "node:assert/strict";
 import { captureScreenshot, createServer } from "../src/server.js";
 
-// Minimal Response-like stub.
+// Real Response objects, not hand-rolled stubs. The capture path bounds and
+// aborts the body through the web ReadableStream contract, and a stub that only
+// offers arrayBuffer()/text() would quietly exercise a different code path than
+// production does — which is precisely the path that must not exist.
 function fakeImageResponse(bytes, contentType = "image/png") {
-  return {
-    ok: true,
-    status: 200,
-    headers: { get: (h) => (h.toLowerCase() === "content-type" ? contentType : null) },
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  };
+  return new Response(Buffer.from(bytes), { status: 200, headers: { "content-type": contentType } });
 }
 function fakeErrorResponse(status, body, contentType = "application/json") {
-  return {
-    ok: false,
-    status,
-    headers: { get: (h) => (h.toLowerCase() === "content-type" ? contentType : null) },
-    text: async () => body,
-  };
+  return new Response(body, { status, headers: { "content-type": contentType } });
 }
 
 let passed = 0;
@@ -89,12 +82,19 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-// 5) API error body is surfaced
+// 5) An API error is classified, never quoted. The request URL carries `userkey`,
+// and both the old exception path (String(err)) and the old body path echoed
+// text that can contain it, so the failure now reports the status and a stable
+// code and nothing the upstream wrote.
 {
-  const fetchImpl = async () => fakeErrorResponse(400, JSON.stringify({ error: "invalid url" }));
+  const fetchImpl = async () =>
+    fakeErrorResponse(400, JSON.stringify({ error: "invalid url", debug: "userkey=K leaked here" }));
   const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
   assert.equal(res.isError, true);
-  assert.match(res.content[0].text, /invalid url/);
+  assert.match(res.content[0].text, /HTTP 400/, "the observed status is still reported");
+  assert.match(res.content[0].text, /upstream_error/, "with a stable classification");
+  assert.doesNotMatch(res.content[0].text, /invalid url|userkey/, "no upstream body text comes back");
+  assert.equal(res._meta["com.site-shot.mcp/error"].httpStatus, 400, "and it is machine-readable");
   passed++;
 }
 
