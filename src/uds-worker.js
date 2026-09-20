@@ -378,6 +378,18 @@ export function createUdsWorker(rawConfig) {
   let server = null;
   let ownedSocket = null; // { dev, ino } of the socket we published, for safe cleanup.
   let boundPath = null; // The private staging path Node actually bound, and will unlink itself.
+  // Startup and shutdown have to be able to happen at the same time. A
+  // supervisor may cancel a start at any point, including after the socket is
+  // reachable, and the answer to that cannot be "wait until it is convenient":
+  // these three make a stop during a start deterministic instead.
+  let startPromise = null; // The in-flight start(), so close() can let it settle.
+  let closePromise = null; // The in-flight close(), so repeated stops are one stop.
+  // Sticky, and checked at one point: immediately before link(). A stop that
+  // arrives before that check stops the start without publishing; a stop that
+  // arrives while link() is already in flight still publishes, and is cleaned
+  // up rather than prevented -- which is why ownership is claimed before the
+  // link rather than after it.
+  let stopRequested = false;
   const active = new Set();
   const stats = { accepted: 0, rejected: 0, peakActive: 0 };
 
@@ -621,143 +633,222 @@ export function createUdsWorker(rawConfig) {
     }
   }
 
-  return {
-    async start() {
-      if (server) throw new Error("site-shot uds-worker: already started.");
+  /** Thrown when a stop arrives while start() is still running. Not a fault. */
+  class StartCancelled extends Error {
+    constructor() {
+      super("site-shot uds-worker: startup cancelled by shutdown.");
+      this.name = "StartCancelled";
+      this.cancelled = true;
+    }
+  }
 
-      const parent = dirname(config.socketPath);
-      const parentStat = await lstat(parent).catch(() => null);
-      if (!parentStat) {
-        throw new Error(`site-shot uds-worker: socket directory does not exist: ${parent}`);
+  /**
+   * Release everything this worker owns. Idempotent, and safe to call from a
+   * failed start: unlike close() it does NOT wait for a start to settle, which
+   * is what lets start()'s own error path use it without deadlocking against a
+   * close() that is waiting for that same start.
+   */
+  async function teardown() {
+    const current = server;
+    server = null;
+    if (current) {
+      const stopped = new Promise((resolve) => current.close(() => resolve()));
+      // Destroy live connections rather than waiting them out: an in-flight
+      // 90-second capture would otherwise hold shutdown open for 90 seconds.
+      // Each destroyed response fires the close handler that cancels its capture.
+      current.closeIdleConnections?.();
+      current.closeAllConnections?.();
+      await stopped;
+    }
+    if (boundPath) {
+      await unlink(boundPath).catch(() => {});
+      boundPath = null;
+    }
+    // Only our own socket, identified by the inode we published — never
+    // whatever happens to sit at that path now.
+    if (ownedSocket) {
+      const now = await stat(config.socketPath).catch(() => null);
+      if (now && now.dev === ownedSocket.dev && now.ino === ownedSocket.ino) {
+        await unlink(config.socketPath).catch(() => {});
       }
-      if (parentStat.isSymbolicLink()) {
-        throw new Error(`site-shot uds-worker: socket directory is a symlink, refusing to bind: ${parent}`);
-      }
-      if (!parentStat.isDirectory()) {
-        throw new Error(`site-shot uds-worker: socket directory is not a directory: ${parent}`);
-      }
-      if (parentStat.mode & 0o002) {
-        throw new Error(`site-shot uds-worker: socket directory is world-writable, refusing to bind: ${parent}`);
-      }
-      // Group-writable is refused for every mode, not only when a group is
-      // trusted: write permission on the directory is permission to unlink our
-      // socket and bind another in its place, and the adapter would then hand
-      // its request context — including the customer's key — to whoever did.
-      // Reaching a socket needs traverse permission on the directory, never write.
-      if (parentStat.mode & 0o020) {
-        throw new Error(`site-shot uds-worker: socket directory is group-writable, refusing to bind: ${parent}`);
-      }
-      if (typeof process.getuid === "function" && parentStat.uid !== process.getuid()) {
-        throw new Error(`site-shot uds-worker: socket directory is not owned by this process: ${parent}`);
-      }
-      if (config.socketGroup !== null) {
-        // A 0660 socket in a directory the group cannot traverse is unreachable
-        // by the peer the mode was widened for — a silently useless permission.
-        if (parentStat.gid !== config.socketGroup) {
-          throw new Error(
-            `site-shot uds-worker: socket directory group is ${parentStat.gid}, not the trusted group ` +
-              `${config.socketGroup}: ${parent}`,
-          );
-        }
-        if (!(parentStat.mode & 0o010)) {
-          throw new Error(
-            `site-shot uds-worker: socket directory is not traversable by the trusted group ` +
-              `${config.socketGroup}: ${parent}`,
-          );
-        }
-      }
+      ownedSocket = null;
+    }
+  }
 
-      // Never unlink a path we did not create: a stale socket is an operator
-      // decision, and an unrelated file at that path must survive us entirely.
-      const existing = await lstat(config.socketPath).catch(() => null);
-      if (existing) {
+  /**
+   * The startup itself. A private closure, not a method: a caller that
+   * could reach it directly would bind a socket without the lifecycle
+   * tracking that lets a stop wait for it.
+   */
+  async function doStart() {
+    const parent = dirname(config.socketPath);
+    const parentStat = await lstat(parent).catch(() => null);
+    if (!parentStat) {
+      throw new Error(`site-shot uds-worker: socket directory does not exist: ${parent}`);
+    }
+    if (parentStat.isSymbolicLink()) {
+      throw new Error(`site-shot uds-worker: socket directory is a symlink, refusing to bind: ${parent}`);
+    }
+    if (!parentStat.isDirectory()) {
+      throw new Error(`site-shot uds-worker: socket directory is not a directory: ${parent}`);
+    }
+    if (parentStat.mode & 0o002) {
+      throw new Error(`site-shot uds-worker: socket directory is world-writable, refusing to bind: ${parent}`);
+    }
+    // Group-writable is refused for every mode, not only when a group is
+    // trusted: write permission on the directory is permission to unlink our
+    // socket and bind another in its place, and the adapter would then hand
+    // its request context — including the customer's key — to whoever did.
+    // Reaching a socket needs traverse permission on the directory, never write.
+    if (parentStat.mode & 0o020) {
+      throw new Error(`site-shot uds-worker: socket directory is group-writable, refusing to bind: ${parent}`);
+    }
+    if (typeof process.getuid === "function" && parentStat.uid !== process.getuid()) {
+      throw new Error(`site-shot uds-worker: socket directory is not owned by this process: ${parent}`);
+    }
+    if (config.socketGroup !== null) {
+      // A 0660 socket in a directory the group cannot traverse is unreachable
+      // by the peer the mode was widened for — a silently useless permission.
+      if (parentStat.gid !== config.socketGroup) {
         throw new Error(
-          `site-shot uds-worker: ${config.socketPath} already exists; remove it deliberately before starting.`,
+          `site-shot uds-worker: socket directory group is ${parentStat.gid}, not the trusted group ` +
+            `${config.socketGroup}: ${parent}`,
+        );
+      }
+      if (!(parentStat.mode & 0o010)) {
+        throw new Error(
+          `site-shot uds-worker: socket directory is not traversable by the trusted group ` +
+            `${config.socketGroup}: ${parent}`,
+        );
+      }
+    }
+
+    // Never unlink a path we did not create: a stale socket is an operator
+    // decision, and an unrelated file at that path must survive us entirely.
+    const existing = await lstat(config.socketPath).catch(() => null);
+    if (existing) {
+      throw new Error(
+        `site-shot uds-worker: ${config.socketPath} already exists; remove it deliberately before starting.`,
+      );
+    }
+
+    // Node's listener teardown unlinks the path it bound, unconditionally and
+    // without checking what is there by then. So it never binds the published
+    // path: it binds a private staging name, we hard-link that name to the
+    // published one, and we drop the staging name immediately. Node is then
+    // left holding a path that no longer exists, and the published path is only
+    // ever removed by the inode check in close().
+    const staging = `${parent}/.ss-${randomBytes(5).toString("hex")}`;
+    if (Buffer.byteLength(staging) > 100) {
+      throw new Error(`site-shot uds-worker: socket directory path is too long to bind safely: ${parent}`);
+    }
+
+    server = http.createServer();
+    server.on("request", (req, res) => {
+      handle(req, res).catch(() => {
+        sendJsonRpcError(res, 500, { code: -32603, message: "Internal error.", reason: "internal_error" });
+      });
+    });
+
+    try {
+      await new Promise((resolve, reject) => {
+        const onError = (err) => {
+          server?.off("listening", onListening);
+          reject(err);
+        };
+        const onListening = () => {
+          server?.off("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(staging);
+      });
+      boundPath = staging;
+
+      // Mode and group are applied while the socket is still private, so it is
+      // never reachable at the published path with the wrong permissions.
+      await chmod(staging, config.socketMode);
+      if (config.socketGroup !== null && typeof process.getuid === "function") {
+        try {
+          await chown(staging, process.getuid(), config.socketGroup);
+        } catch (err) {
+          throw new Error(
+            `site-shot uds-worker: cannot give the socket to group ${config.socketGroup} ` +
+              `(${err?.code ?? "failed"}); this process is not a member of it.`,
+          );
+        }
+      }
+
+      const staged = await stat(staging);
+      if ((staged.mode & 0o777) !== config.socketMode) {
+        throw new Error("site-shot uds-worker: socketMode could not be applied to the socket.");
+      }
+      if (typeof process.getuid === "function" && staged.uid !== process.getuid()) {
+        throw new Error("site-shot uds-worker: socket is not owned by this process.");
+      }
+      if (config.socketGroup !== null && staged.gid !== config.socketGroup) {
+        throw new Error(
+          `site-shot uds-worker: socket group is ${staged.gid}, not the configured group ${config.socketGroup}.`,
         );
       }
 
-      // Node's listener teardown unlinks the path it bound, unconditionally and
-      // without checking what is there by then. So it never binds the published
-      // path: it binds a private staging name, we hard-link that name to the
-      // published one, and we drop the staging name immediately. Node is then
-      // left holding a path that no longer exists, and the published path is only
-      // ever removed by the inode check in close().
-      const staging = `${parent}/.ss-${randomBytes(5).toString("hex")}`;
-      if (Buffer.byteLength(staging) > 100) {
-        throw new Error(`site-shot uds-worker: socket directory path is too long to bind safely: ${parent}`);
-      }
+      // Last point at which nothing is reachable yet. A stop that has
+      // already arrived stops here, rather than publishing a socket and
+      // relying on someone to come back for it.
+      if (stopRequested) throw new StartCancelled();
 
-      server = http.createServer();
-      server.on("request", (req, res) => {
-        handle(req, res).catch(() => {
-          sendJsonRpcError(res, 500, { code: -32603, message: "Internal error.", reason: "internal_error" });
-        });
-      });
+      // Claim the inode BEFORE publishing it. A hard link is another name
+      // for this same inode, so `staged` identifies what link() is about to
+      // expose -- and if anything between here and the end of start() fails,
+      // teardown already knows which inode is ours to remove. Claiming it
+      // after link() left a window where the socket was published and
+      // unowned, which is precisely the state nothing cleans up.
+      ownedSocket = { dev: staged.dev, ino: staged.ino };
 
+      // link() refuses to clobber, so a race that created something at the
+      // published path in the meantime fails the start rather than winning it.
+      await link(staging, config.socketPath);
+
+      // Inside the guarded region on purpose: if the logger throws, startup
+      // must unwind the listener and the published socket rather than leaving
+      // a live, reachable worker behind a failed start().
+      log("started", { socket: config.socketPath, mode: `0${config.socketMode.toString(8)}` });
+    } catch (err) {
+      // teardown, not close(): close() waits for the in-flight start, and
+      // that start is this one.
+      await teardown();
+      throw err;
+    } finally {
+      // Either it is published under its real name or the start failed; either
+      // way the staging name has done its job.
+      await unlink(staging).catch(() => {});
+      if (boundPath === staging) boundPath = null;
+    }
+
+  }
+
+  return {
+    /**
+     * Start once. Both guards matter: `server` is only assigned partway
+     * through doStart(), after its first await, so two calls that arrive
+     * together would both pass a `server`-only check, share this worker's
+     * server/boundPath/ownedSocket and leave teardown holding one of them.
+     * `startPromise` is assigned synchronously here, before doStart() can
+     * yield, so the second caller is refused deterministically.
+     */
+    async start() {
+      if (server || startPromise) throw new Error("site-shot uds-worker: already started.");
+      // A stop that arrived before this call is still a stop. Starting anyway
+      // would publish a socket nothing is going to remove.
+      if (stopRequested) throw new StartCancelled();
+      startPromise = doStart();
       try {
-        await new Promise((resolve, reject) => {
-          const onError = (err) => {
-            server?.off("listening", onListening);
-            reject(err);
-          };
-          const onListening = () => {
-            server?.off("error", onError);
-            resolve();
-          };
-          server.once("error", onError);
-          server.once("listening", onListening);
-          server.listen(staging);
-        });
-        boundPath = staging;
-
-        // Mode and group are applied while the socket is still private, so it is
-        // never reachable at the published path with the wrong permissions.
-        await chmod(staging, config.socketMode);
-        if (config.socketGroup !== null && typeof process.getuid === "function") {
-          try {
-            await chown(staging, process.getuid(), config.socketGroup);
-          } catch (err) {
-            throw new Error(
-              `site-shot uds-worker: cannot give the socket to group ${config.socketGroup} ` +
-                `(${err?.code ?? "failed"}); this process is not a member of it.`,
-            );
-          }
-        }
-
-        const staged = await stat(staging);
-        if ((staged.mode & 0o777) !== config.socketMode) {
-          throw new Error("site-shot uds-worker: socketMode could not be applied to the socket.");
-        }
-        if (typeof process.getuid === "function" && staged.uid !== process.getuid()) {
-          throw new Error("site-shot uds-worker: socket is not owned by this process.");
-        }
-        if (config.socketGroup !== null && staged.gid !== config.socketGroup) {
-          throw new Error(
-            `site-shot uds-worker: socket group is ${staged.gid}, not the configured group ${config.socketGroup}.`,
-          );
-        }
-
-        // link() refuses to clobber, so a race that created something at the
-        // published path in the meantime fails the start rather than winning it.
-        await link(staging, config.socketPath);
-        const published = await stat(config.socketPath);
-        ownedSocket = { dev: published.dev, ino: published.ino };
-
-        // Inside the guarded region on purpose: if the logger throws, startup
-        // must unwind the listener and the published socket rather than leaving
-        // a live, reachable worker behind a failed start().
-        log("started", { socket: config.socketPath, mode: `0${config.socketMode.toString(8)}` });
-      } catch (err) {
-        await this.close();
-        throw err;
+        await startPromise;
+        return this;
       } finally {
-        // Either it is published under its real name or the start failed; either
-        // way the staging name has done its job.
-        await unlink(staging).catch(() => {});
-        if (boundPath === staging) boundPath = null;
+        startPromise = null;
       }
-
-      return this;
     },
 
     address() {
@@ -782,31 +873,36 @@ export function createUdsWorker(rawConfig) {
       return { ...stats, active: active.size };
     },
 
+    /**
+     * Stop, including while starting.
+     *
+     * Two things make this safe to call at any moment. It marks the stop
+     * first, synchronously, so a start that has not published yet unwinds
+     * instead of publishing; and it then waits for any in-flight start to
+     * SETTLE before releasing anything, so cleanup never races the code that
+     * is still acquiring. The wait is on the start's own filesystem work, not
+     * on a timer.
+     *
+     * Repeated stops are one stop: every caller gets the same promise and
+     * returns when the single teardown is done, so a SIGINT arriving behind a
+     * SIGTERM cannot exit the process while the first stop is mid-cleanup.
+     */
     async close() {
-      const current = server;
-      server = null;
-      if (current) {
-        const stopped = new Promise((resolve) => current.close(() => resolve()));
-        // Destroy live connections rather than waiting them out: an in-flight
-        // 90-second capture would otherwise hold shutdown open for 90 seconds.
-        // Each destroyed response fires the close handler that cancels its capture.
-        current.closeIdleConnections?.();
-        current.closeAllConnections?.();
-        await stopped;
+      stopRequested = true;
+      if (!closePromise) {
+        closePromise = (async () => {
+          const pending = startPromise;
+          // Its failure is the start's to report, not this shutdown's.
+          if (pending) await pending.catch(() => {});
+          await teardown();
+        })();
       }
-      if (boundPath) {
-        await unlink(boundPath).catch(() => {});
-        boundPath = null;
-      }
-      // Only our own socket, identified by the inode we published — never
-      // whatever happens to sit at that path now.
-      if (ownedSocket) {
-        const now = await stat(config.socketPath).catch(() => null);
-        if (now && now.dev === ownedSocket.dev && now.ino === ownedSocket.ino) {
-          await unlink(config.socketPath).catch(() => {});
-        }
-        ownedSocket = null;
-      }
+      return closePromise;
+    },
+
+    /** Whether a stop has been asked for. The signal handlers read this. */
+    get stopping() {
+      return stopRequested;
     },
   };
 }
@@ -871,17 +967,46 @@ export function configFromEnv(env = process.env) {
 
 async function main() {
   const worker = createUdsWorker(configFromEnv());
-  await worker.start();
 
+  // BEFORE start(), not after. start() publishes a reachable socket partway
+  // through and then keeps going -- it still awaits an unlink of the staging
+  // name before it returns -- so a supervisor that signals a worker it can
+  // already reach used to hit the default action: killed by the signal, with
+  // the published socket left behind for the next start to refuse.
+  //
+  // Registered here, the handlers cover every startup and publication phase
+  // that follows, which is every phase in which this process owns anything.
+  // They do not cover module import and configuration, and they do not need
+  // to: nothing is bound, published or reachable yet, so a termination there
+  // has nothing to clean up.
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    // close() waits for an in-flight start to settle before releasing
+    // anything, so this is exactly as correct mid-startup as it is later.
     await worker.close();
     process.exit(0);
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
+
+  try {
+    await worker.start();
+  } catch (err) {
+    if (worker.stopping) {
+      // We asked for this: the stop above cancelled the start, and it owns
+      // the exit. A genuine startup error that happened to land in the same
+      // moment is still worth one line, without unwinding the shutdown.
+      if (!err?.cancelled) {
+        process.stderr.write(
+          `[site-shot-mcp-uds] Startup ended during shutdown: ${err?.message ?? "failed"}\n`,
+        );
+      }
+      return;
+    }
+    throw err;
+  }
 }
 
 // Only when run directly. Importing this module must never bind a socket.

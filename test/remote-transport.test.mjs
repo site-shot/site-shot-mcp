@@ -1402,10 +1402,9 @@ test("the entrypoint requires every bound in the environment and ignores the API
   assert.throws(() => configFromEnv({ ...env, SITESHOT_MCP_UDS_MODE: "0666" }), /socketMode/);
 });
 
-test("the entrypoint runs as its own process, serves MCP, and cleans up on SIGTERM", async () => {
-  const dir = privateDir();
-  const sockPath = join(dir, "m.sock");
-  const child = spawn(process.execPath, [fileURLToPath(new URL("../src/uds-worker.js", import.meta.url))], {
+/** The real entrypoint as its own process, configured the way a launch would. */
+function spawnEntrypoint(sockPath, entry = fileURLToPath(new URL("../src/uds-worker.js", import.meta.url))) {
+  const child = spawn(process.execPath, [entry], {
     env: {
       PATH: process.env.PATH,
       SITESHOT_MCP_UDS_PATH: sockPath,
@@ -1421,11 +1420,92 @@ test("the entrypoint runs as its own process, serves MCP, and cleans up on SIGTE
       // Present on purpose: a stray key in the worker's environment must stay unused.
       SITESHOT_API_KEY: POISON_ENV_KEY,
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    // stdin is a pipe because the instrumented copy below is released over it.
+    stdio: ["pipe", "pipe", "pipe"],
   });
   const stderr = [];
   child.stderr.on("data", (c) => stderr.push(c.toString()));
   const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+  return { child, stderr, exited };
+}
+
+/** A child that will not exit must fail this test, not hang the whole run. */
+async function exitWithin(exited, timeoutMs, what) {
+  let timer;
+  try {
+    return await Promise.race([
+      exited,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what}: no exit within ${timeoutMs}ms`)), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// A temporary, instrumented copy of the real entrypoint. Spinning until the
+// socket appears and then signalling finds the earliest moment an observer
+// can see, but it does not CAUSE the interleaving -- the child may well have
+// finished start() before the parent gets scheduled. These two injections
+// make it causal: the child stops at the post-publication await and stays
+// there until released, and it announces that its signal handler ran, so the
+// parent knows the stop landed inside the window rather than after it.
+//
+// Test-only, written to a temp file and deleted. Every anchor is asserted, so
+// if the source moves this fails loudly instead of quietly instrumenting
+// nothing.
+const PUBLISH_ANCHOR = "      await link(staging, config.socketPath);\n";
+const STOP_ANCHOR = "    stopping = true;\n";
+const HANDLERS_ANCHOR = '  process.on("SIGTERM", stop);\n  process.on("SIGINT", stop);\n';
+const START_ANCHOR = "    await worker.start();\n";
+
+const HOLD_AT_PUBLICATION = `      process.stderr.write("[barrier] published\\n");
+      await new Promise((resolve) => {
+        process.stdin.resume();
+        process.stdin.once("data", resolve);
+      });
+`;
+const ANNOUNCE_STOP = '    process.stderr.write("[barrier] stop-handled\\n");\n';
+
+let instrumentedCount = 0;
+
+const FAIL_AFTER_PUBLICATION = '      throw new Error("injected: startup failed after publishing");\n';
+
+function instrumentedEntrypoint({ legacy = false, failAfterPublish = false } = {}) {
+  let source = readFileSync(new URL("../src/uds-worker.js", import.meta.url), "utf8");
+  for (const [name, anchor] of [["publication", PUBLISH_ANCHOR], ["stop", STOP_ANCHOR]]) {
+    assert.equal(source.split(anchor).length - 1, 1, `${name} anchor is not unique; re-point the instrumentation`);
+  }
+  source = source.replace(
+    PUBLISH_ANCHOR,
+    PUBLISH_ANCHOR + (failAfterPublish ? FAIL_AFTER_PUBLICATION : HOLD_AT_PUBLICATION),
+  );
+  source = source.replace(STOP_ANCHOR, STOP_ANCHOR + ANNOUNCE_STOP);
+  if (legacy) {
+    // The ordering before this fix: handlers installed only once start()
+    // resolved. Reproduced here so the barrier is shown to catch it.
+    assert.equal(source.split(HANDLERS_ANCHOR).length - 1, 1, "handler anchor is not unique");
+    assert.equal(source.split(START_ANCHOR).length - 1, 1, "start anchor is not unique");
+    source = source.replace(HANDLERS_ANCHOR, "");
+    source = source.replace(
+      START_ANCHOR,
+      START_ANCHOR + '    process.on("SIGTERM", stop);\n    process.on("SIGINT", stop);\n',
+    );
+  }
+  source = source.replace('from "./server.js"', 'from "../src/server.js"');
+  const file = fileURLToPath(
+    new URL(`./tmp-entrypoint-${process.pid}-${instrumentedCount++}.mjs`, import.meta.url),
+  );
+  writeFileSync(file, source);
+  return file;
+}
+
+test("the entrypoint runs as its own process, serves MCP, and cleans up on SIGTERM", async () => {
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  const { child, stderr, exited } = spawnEntrypoint(sockPath);
 
   try {
     await until(() => existsSync(sockPath), { timeoutMs: 10_000 });
@@ -1753,4 +1833,266 @@ test("the capture function itself refuses an unexpected image type", async () =>
   assert.equal(res.isError, true);
   assert.equal(res._meta["com.site-shot.mcp/error"].code, "unsupported_image_type");
   assert.ok(!JSON.stringify(res).includes("SYNTH_MIME_SECRET"), "the subtype is not reflected");
+});
+
+// ---------------------------------------------------------------------------
+// Startup cancellation (CR-MCP-START-001).
+//
+// A supervisor may stop a worker at any moment, including while it is still
+// starting. The window that made that dangerous: start() publishes a reachable
+// socket partway through and keeps going, and main() used to install its
+// signal handlers only after start() resolved -- so a signal in between took
+// Node's default action, killing the process with the published socket left on
+// disk for the next start to refuse.
+//
+// None of these tests waits for anything to become convenient. Each one makes
+// the stop land in a specific place: calling close() on the line after start()
+// is guaranteed to land while start() is in flight, because start() has
+// already yielded at its first await; and the "started" log line is emitted
+// after the socket is published and before start() returns, which is the exact
+// interval the defect lived in.
+// ---------------------------------------------------------------------------
+
+test("a stop before publication leaves nothing published and nothing staged", async () => {
+  const dir = privateDir();
+  try {
+    const worker = createUdsWorker(baseConfig(dir));
+    // No await between these two: the stop is in flight before start() can
+    // reach its publication step.
+    const starting = worker.start();
+    const stopping = worker.close();
+    const [started] = await Promise.allSettled([starting, stopping]);
+
+    assert.equal(started.status, "rejected", "a cancelled start must not report success");
+    assert.equal(started.reason.cancelled, true, "and must say it was cancelled, not failed");
+    assert.equal(existsSync(join(dir, "m.sock")), false, "nothing was published");
+    assert.deepEqual(readdirSync(dir), [], "and no staging socket survived");
+
+    // The point of cleaning up: the next start is ordinary.
+    const next = createUdsWorker(baseConfig(dir));
+    await next.start();
+    assert.ok(statSync(join(dir, "m.sock")).isSocket(), "a later start is clean");
+    await next.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stop after publication and before start() returns removes the socket", async () => {
+  const dir = privateDir();
+  try {
+    const lines = [];
+    let stopping = null;
+    const worker = createUdsWorker(
+      baseConfig(dir, {
+        logger: (line) => {
+          lines.push(line);
+          // Emitted after link() and before start() returns: the interval a
+          // readiness probe cannot see past, because the socket is already
+          // reachable and answering here.
+          if (line.includes("outcome=started") && !stopping) stopping = worker.close();
+        },
+      }),
+    );
+
+    await worker.start();
+    assert.ok(
+      lines.some((line) => line.includes("outcome=started")),
+      "the socket really was published before the stop",
+    );
+    assert.ok(stopping, "the stop was issued from inside the publication window");
+    await stopping;
+
+    assert.equal(existsSync(join(dir, "m.sock")), false, "the published socket was removed");
+    assert.deepEqual(readdirSync(dir), [], "and no staging socket survived");
+
+    const next = createUdsWorker(baseConfig(dir));
+    await next.start();
+    assert.ok(statSync(join(dir, "m.sock")).isSocket(), "a later start is clean");
+    await next.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stopping repeatedly is one stop, and a late stop unlinks nothing", async () => {
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  try {
+    const worker = createUdsWorker(baseConfig(dir));
+    const starting = worker.start();
+    // Three stops at once, the way SIGINT behind SIGTERM behind a supervisor
+    // call arrive. None of them may return before the single teardown is done.
+    const stops = [worker.close(), worker.close(), worker.close()];
+    await Promise.allSettled([starting, ...stops]);
+    for (const stop of stops) await stop;
+
+    assert.equal(existsSync(sockPath), false);
+    assert.deepEqual(readdirSync(dir), []);
+
+    // Something else takes the path afterwards. A stop that still thought it
+    // owned it would delete a stranger's file.
+    writeFileSync(sockPath, "someone else's");
+    await worker.close();
+    await worker.close();
+    assert.equal(readFileSync(sockPath, "utf8"), "someone else's", "a late stop unlinked a foreign path");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stop leaves a foreign replacement at the published path alone", async () => {
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  try {
+    const worker = createUdsWorker(baseConfig(dir));
+    await worker.start();
+    const ours = statSync(sockPath).ino;
+
+    // The published socket is replaced by an unrelated file at the same path.
+    // Shutdown identifies its socket by inode, so this must survive.
+    unlinkSync(sockPath);
+    writeFileSync(sockPath, "not ours");
+    assert.notEqual(statSync(sockPath).ino, ours, "the replacement is a different inode");
+
+    await worker.close();
+    assert.equal(readFileSync(sockPath, "utf8"), "not ours", "shutdown removed a path it did not own");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a startup error overlapping a stop settles without leaking or unlinking", async () => {
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  try {
+    // Something is already at the published path, so start() refuses it --
+    // deterministically, and for a reason that is not the cancellation.
+    writeFileSync(sockPath, "occupied");
+    const worker = createUdsWorker(baseConfig(dir));
+    const starting = worker.start();
+    const stopping = worker.close();
+    const [started, stopped] = await Promise.allSettled([starting, stopping]);
+
+    assert.equal(started.status, "rejected");
+    assert.match(started.reason.message, /already exists/, "the real startup error is reported");
+    assert.notEqual(started.reason.cancelled, true, "and is not mislabelled as a cancellation");
+    assert.equal(stopped.status, "fulfilled", "the stop still completes");
+    assert.equal(readFileSync(sockPath, "utf8"), "occupied", "the occupying file is untouched");
+    assert.deepEqual(readdirSync(dir), ["m.sock"], "no staging socket survived the failed start");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The causal proof. The child is held at the post-publication await, the
+// signal is sent while it is held, the handler is observed to have run, and
+// only then is startup released. Nothing here waits for a convenient moment.
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  test(`${signal} received while startup is held after publication stops cleanly`, async () => {
+    const dir = privateDir();
+    const sockPath = join(dir, "m.sock");
+    const entry = instrumentedEntrypoint();
+    const { child, stderr, exited } = spawnEntrypoint(sockPath, entry);
+    try {
+      await until(() => stderr.join("").includes("[barrier] published"), { timeoutMs: 15_000 });
+      assert.ok(existsSync(sockPath), "the barrier is meant to hold AFTER publication");
+
+      child.kill(signal);
+      // The handler ran while startup was still held. Until this line
+      // appears, the stop has not landed inside the window and releasing
+      // would test the ordinary post-start path instead.
+      await until(() => stderr.join("").includes("[barrier] stop-handled"), { timeoutMs: 15_000 });
+      assert.ok(existsSync(sockPath), "startup is still held, so the socket is still published");
+
+      child.stdin.write("go\n");
+      const end = await exitWithin(exited, 20_000, `${signal} during held startup`);
+
+      assert.equal(end.signal, null, `killed by ${signal} instead of handling it`);
+      assert.equal(end.code, 0, `clean exit (stderr: ${stderr.join("")})`);
+      assert.equal(existsSync(sockPath), false, "the published socket outlived the worker");
+      assert.deepEqual(readdirSync(dir), [], "and no staging socket survived");
+    } finally {
+      child.kill("SIGKILL");
+      await exited.catch(() => {});
+      rmSync(entry, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("the pre-fix entrypoint ordering is killed by the same barrier", async () => {
+  // The control. Same instrumentation, handlers installed only after start()
+  // resolves -- which is where they were. Without this, the two tests above
+  // would pass on code that never had the defect and prove nothing about it.
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  const entry = instrumentedEntrypoint({ legacy: true });
+  const { child, stderr, exited } = spawnEntrypoint(sockPath, entry);
+  try {
+    await until(() => stderr.join("").includes("[barrier] published"), { timeoutMs: 15_000 });
+    child.kill("SIGTERM");
+
+    const end = await exitWithin(exited, 20_000, "pre-fix ordering");
+    assert.equal(end.signal, "SIGTERM", "the pre-fix ordering is supposed to die by the signal");
+    assert.equal(end.code, null);
+    assert.ok(
+      !stderr.join("").includes("[barrier] stop-handled"),
+      "no handler can have run: that is the defect",
+    );
+    assert.equal(existsSync(sockPath), true, "and the published socket is left behind");
+  } finally {
+    child.kill("SIGKILL");
+    await exited.catch(() => {});
+    rmSync(entry, { force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two starts at once: exactly one is refused, and cleanup still holds", async () => {
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  try {
+    const worker = createUdsWorker(baseConfig(dir));
+    // `server` is only assigned partway through startup, after its first
+    // await, so a guard on `server` alone lets both of these through -- and
+    // they then share one worker's server, staging path and owned inode.
+    const [first, second] = await Promise.allSettled([worker.start(), worker.start()]);
+    const outcomes = [first, second];
+    assert.equal(outcomes.filter((o) => o.status === "fulfilled").length, 1, "exactly one start wins");
+    const refused = outcomes.find((o) => o.status === "rejected");
+    assert.match(refused.reason.message, /already started/);
+
+    assert.ok(statSync(sockPath).isSocket(), "the winner published exactly one socket");
+    await worker.close();
+    assert.equal(existsSync(sockPath), false, "and it is the one that gets removed");
+    assert.deepEqual(readdirSync(dir), [], "no staging path was orphaned by the loser");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a startup that fails after publishing still takes its socket with it", async () => {
+  // The other half of owning the inode. Nothing stops this worker: startup
+  // itself fails at a point where the socket is already published, so the
+  // only thing that can clean up is start()'s own unwinding -- and it can
+  // only do that if it already knows which inode is its own. Claiming
+  // ownership after publication instead leaves a live path nothing removes,
+  // which the next start then refuses.
+  const dir = privateDir();
+  const sockPath = join(dir, "m.sock");
+  const entry = instrumentedEntrypoint({ failAfterPublish: true });
+  const { child, stderr, exited } = spawnEntrypoint(sockPath, entry);
+  try {
+    const end = await exitWithin(exited, 20_000, "failed startup");
+    assert.equal(end.code, 1, `a failed startup exits non-zero (stderr: ${stderr.join("")})`);
+    assert.match(stderr.join(""), /injected: startup failed after publishing/);
+    assert.equal(existsSync(sockPath), false, "the published socket outlived the failed startup");
+    assert.deepEqual(readdirSync(dir), [], "and no staging socket survived");
+  } finally {
+    child.kill("SIGKILL");
+    await exited.catch(() => {});
+    rmSync(entry, { force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
