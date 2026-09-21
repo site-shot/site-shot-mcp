@@ -72,6 +72,19 @@ async function servedTools() {
   return tools;
 }
 
+/** What the server states about itself in the handshake, read over a real MCP session. */
+async function servedIdentity() {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer({ apiKey: "TEST_KEY_NOT_USED", fetchImpl: async () => {
+    throw new Error("metadata tests must never call the API");
+  } });
+  const client = new Client({ name: "plugin-metadata-test", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const identity = client.getServerVersion();
+  await client.close();
+  return identity;
+}
+
 test("marketplace entry resolves to the plugin directory it names", () => {
   assert.equal(marketplace.name, "site-shot", "marketplace keeps the brand name");
   assert.match(marketplace.name, /^[a-z0-9]+(-[a-z0-9]+)*$/, "kebab-case marketplace name");
@@ -643,5 +656,27 @@ test("copy does not imply per-capture charges or promise every page", () => {
     // and a failed capture is not automatically a paid one.
     assert.doesNotMatch(text, /\bbilled\b|\bcharged\b|\bper[- ]capture (?:charge|cost|fee)\b/i, "no per-invocation billing claim");
     assert.doesNotMatch(text, /\bany (?:public )?web page\b/i, "no promise to capture any page whatsoever");
+  }
+});
+
+// The versions the tests above could not see. Everything they check is a file this
+// suite reads; `serverInfo.version` is a value the server states over the wire during
+// the handshake, and it is what a client -- or a directory reviewer -- actually sees.
+// It drifted exactly because it was a literal nobody had to touch: 1.1.2 went to npm
+// while the handshake kept answering 1.1.1. src/server.js now derives it from
+// package.json, and this test is what keeps that true if someone puts a literal back.
+// manifest.json and server.json are the other two release descriptors no other test
+// reads, and they can drift the same silent way.
+test("every version this package states agrees with package.json", async () => {
+  const identity = await servedIdentity();
+  assert.equal(identity?.version, pkg.version, "the MCP handshake states this package's version");
+  assert.equal(identity?.name, "site-shot", "the handshake keeps the brand name");
+
+  assert.equal(readJson("manifest.json").version, pkg.version, "MCPB manifest tracks the package");
+
+  const registry = readJson("server.json");
+  assert.equal(registry.version, pkg.version, "MCP Registry entry tracks the package");
+  for (const entry of registry.packages ?? []) {
+    assert.equal(entry.version, pkg.version, `registry package "${entry.identifier}" tracks the package`);
   }
 });

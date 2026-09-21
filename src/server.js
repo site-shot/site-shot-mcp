@@ -1,5 +1,16 @@
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+
+// Read from package.json rather than repeating the number here. A literal in this file
+// is a second place a release has to remember to touch, and it was already missed once:
+// 1.1.2 shipped to npm while the handshake kept answering 1.1.1, so every client and
+// every directory reviewer was told the wrong version by the server itself. package.json
+// is always present in the published tarball, and `src/` sits one level below it both in
+// the repo and in an installed node_modules copy.
+const { version: PACKAGE_VERSION } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
 
 const API_BASE = "https://api.site-shot.com/";
 const REQUEST_TIMEOUT_MS = 90_000; // Site-Shot renders can take up to ~70s on heavy pages.
@@ -259,7 +270,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: "1.1.1",
+    version: PACKAGE_VERSION,
   });
 
   server.registerTool(

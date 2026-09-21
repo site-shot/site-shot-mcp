@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.3
+
+### Fixed
+
+- The server told every client the wrong version of itself. `serverInfo.version`
+  was a literal in `src/server.js` that a release had to remember to update
+  separately, and 1.1.2 went to npm while the handshake kept answering `1.1.1`.
+  That is the version a client reports and a directory reviewer reads, so the
+  package misrepresented itself everywhere it was installed. The version is now
+  read from `package.json`, so there is no second place to update, and a test
+  asserts over a real MCP session that the handshake, the MCPB manifest and the
+  MCP Registry entry all state the package's own version.
+
+No request the server makes, no tool, no schema and no default has changed.
+
 ## 1.1.2
 
 Documentation only — no behavior change.
