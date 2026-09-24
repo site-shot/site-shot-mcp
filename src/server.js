@@ -212,7 +212,11 @@ const baseInputShape = {
       "Viewport height in pixels. If omitted, the Site-Shot API's own default applies — pass a " +
         "value whenever the exact size matters.",
     ),
-  format: z.enum(["png", "jpeg"]).optional().describe("Image format. Default: png."),
+  format: z.enum(["png", "jpeg", "webp"]).optional().describe(
+    "Image format. Default: png. png and webp are lossless; webp is typically about 35% smaller than png. " +
+      "jpeg is lossy and smallest on photo-heavy pages. WebP cannot exceed 16,383 px on a side: " +
+      "a taller full-page capture comes back cut at 16,383 px from the top.",
+  ),
   block_ads: z.boolean().optional().describe("Remove ads for a cleaner screenshot. Default: true."),
   block_cookie_banners: z
     .boolean()

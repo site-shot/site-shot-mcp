@@ -383,6 +383,47 @@ test("the skill only names tools and params the server actually serves", async (
   );
 });
 
+test("format accepts png, jpeg and webp, rejects tiff and jpg, and documents webp truthfully", async () => {
+  const tools = await servedTools();
+  for (const toolName of ["capture_screenshot", "capture_full_page"]) {
+    const format = tools.find((t) => t.name === toolName)?.inputSchema?.properties?.format;
+    assert.ok(format, `${toolName} advertises a format param`);
+    assert.deepEqual(format.enum, ["png", "jpeg", "webp"], `${toolName} format enum`);
+    assert.match(format.description, /lossless/, `${toolName} format description calls webp lossless`);
+    assert.match(
+      format.description,
+      /16,383/,
+      `${toolName} format description states the WebP 16,383px-per-side limit`,
+    );
+  }
+
+  // Bad values never reach the handler (and so never reach fetchImpl): the SDK's own schema
+  // layer rejects them before captureScreenshot runs. "jpg" is deliberate -- the API accepts it
+  // as an alias, but the MCP enum must not, so the alias stays documented in one place only.
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer({
+    apiKey: "TEST_KEY_NOT_USED",
+    fetchImpl: async () => {
+      throw new Error("metadata tests must never call the API");
+    },
+  });
+  const client = new Client({ name: "plugin-metadata-test", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  for (const bad of ["tiff", "jpg"]) {
+    const res = await client.callTool({
+      name: "capture_screenshot",
+      arguments: { url: "https://example.com", format: bad },
+    });
+    assert.equal(res.isError, true, `format "${bad}" should be rejected`);
+    assert.match(
+      res.content[0].text,
+      /invalid_enum_value/,
+      `format "${bad}" should be rejected by schema validation, not the handler`,
+    );
+  }
+  await client.close();
+});
+
 test("the skill states the paid requirement and claims nothing it cannot do", () => {
   const skill = read(`${pluginDir}/skills/website-screenshots/SKILL.md`);
 

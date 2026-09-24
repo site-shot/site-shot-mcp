@@ -90,7 +90,7 @@ it launches is the declared stdio MCP server.
 ## Codex CLI (plugin)
 
 This repository is also a Codex plugin marketplace. It installs the same plugin directory as Claude
-Code does — one shared skill, the same pinned `site-shot-mcp@1.1.3` over stdio — with its own
+Code does — one shared skill, the same pinned `site-shot-mcp@1.2.0` over stdio — with its own
 manifest, because the two hosts wire the credential differently.
 
 ### Install
@@ -113,7 +113,7 @@ still needs a Site-Shot plan with allowance left on it.
 Codex forwards the variable named in the plugin's descriptor:
 
 ```json
-{ "command": "npx", "args": ["-y", "site-shot-mcp@1.1.3"], "env_vars": ["SITESHOT_API_KEY"] }
+{ "command": "npx", "args": ["-y", "site-shot-mcp@1.2.0"], "env_vars": ["SITESHOT_API_KEY"] }
 ```
 
 `env_vars` is an allow-list of names, not values: no key appears in this descriptor, in the command
@@ -143,11 +143,11 @@ server. Pick one.
 ```toml
 [mcp_servers.site-shot]
 command = "npx"
-args = ["-y", "site-shot-mcp@1.1.3"]
+args = ["-y", "site-shot-mcp@1.2.0"]
 env_vars = ["SITESHOT_API_KEY"]
 ```
 
-`codex mcp add site-shot -- npx -y site-shot-mcp@1.1.3` writes that entry for you; add `env_vars`
+`codex mcp add site-shot -- npx -y site-shot-mcp@1.2.0` writes that entry for you; add `env_vars`
 afterwards, since `codex mcp add --env KEY=VALUE` would store the key in the file in clear text.
 Check it with `codex mcp get site-shot`. If you already have an entry like this and now install the
 plugin, remove the manual one deliberately with `codex mcp remove site-shot` — nothing here edits
@@ -198,7 +198,7 @@ Screenshot a web page (viewport by default).
 | `url` | string (required) | — | Page to capture |
 | `full_page` | boolean | `false` | Capture the whole scrollable page |
 | `width` / `height` | number | API default | Viewport / device size |
-| `format` | `"png"` \| `"jpeg"` | `png` | Image format |
+| `format` | `"png"` \| `"jpeg"` \| `"webp"` | `png` | Image format. `webp` is lossless, about 35% smaller than `png` on the median page, max 16,383 px per side |
 | `block_ads` | boolean | `true` | Remove ads |
 | `block_cookie_banners` | boolean | `true` | Remove cookie-consent popups |
 | `country` | string | — | Proxy country as a two-letter [ISO 3166-1 alpha-2](https://www.site-shot.com/countries) code, e.g. `"DE"` (auto IP/lang/tz/geo) |

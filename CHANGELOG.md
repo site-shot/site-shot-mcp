@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-09-24
+
+### Added
+
+- `format` accepts `"webp"`: lossless, about 35% smaller than png on the median page; limited to 16,383 px per side.
+
 ## 1.1.3
 
 ### Fixed

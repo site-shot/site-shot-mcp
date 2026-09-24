@@ -1,6 +1,6 @@
 {
   "name": "site-shot",
-  "version": "1.1.3",
+  "version": "1.2.0",
   "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
   "author": {
     "name": "Site-Shot",
@@ -15,7 +15,7 @@
   "mcpServers": {
     "site-shot": {
       "command": "npx",
-      "args": ["-y", "site-shot-mcp@1.1.3"],
+      "args": ["-y", "site-shot-mcp@1.2.0"],
       "env_vars": ["SITESHOT_API_KEY"]
     }
   },
