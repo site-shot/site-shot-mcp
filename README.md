@@ -308,7 +308,7 @@ on an operator's behalf, and startup fails if one is missing:
 | `SITESHOT_MCP_ALLOWED_HOSTS` | Comma-separated `Host` allow-list |
 | `SITESHOT_MCP_MAX_REQUEST_BYTES` | Ceiling on the incoming JSON-RPC body |
 | `SITESHOT_MCP_MAX_IMAGE_BYTES` | Ceiling on the captured image bytes |
-| `SITESHOT_MCP_MAX_RESPONSE_BYTES` | Ceiling on the **whole HTTP response** — status line, headers and body. Base64 adds a third on top of the image, plus the JSON-RPC envelope. Must fit `tools/list` with both schemas (~3 KiB), or every listing is refused |
+| `SITESHOT_MCP_MAX_RESPONSE_BYTES` | Ceiling on the **whole HTTP response** — status line, headers and body. Base64 adds a third on top of the image, plus the JSON-RPC envelope. Must fit `tools/list` with both schemas (~6 KiB), or every listing is refused |
 | `SITESHOT_MCP_MAX_ERROR_BODY_BYTES` | How much of a non-image response is read to classify it |
 | `SITESHOT_MCP_MAX_CONCURRENT_REQUESTS` | Active requests; there is no queue, an over-limit request is refused |
 | `SITESHOT_MCP_CAPTURE_TIMEOUT_MS` | Overall capture deadline |
@@ -330,9 +330,9 @@ in the message text and in `_meta`; the full set is `missing_api_key`,
 `upstream_unreachable`, `upstream_error`, `country_unavailable`,
 `response_too_large`, `response_unreadable` and `unsupported_image_type`.
 
-Only `image/png` and `image/jpeg` are served. Any other type the API answers with
-is an `unsupported_image_type` error rather than a screenshot, and the subtype is
-not repeated back.
+Only `image/png`, `image/jpeg` and `image/webp` are served — the three formats the
+tools offer. Any other type the API answers with is an `unsupported_image_type`
+error rather than a screenshot, and the subtype is not repeated back.
 
 ## Requirements
 

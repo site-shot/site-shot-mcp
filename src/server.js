@@ -36,15 +36,17 @@ export const CAPTURE_ERROR_CODES = Object.freeze({
 /**
  * The only MIME types a capture may come back as.
  *
- * Both tools offer exactly two formats, so these are the two types that can be a
- * legitimate answer. Copying the upstream Content-Type through instead would put
- * an arbitrary upstream string into the MCP result, and would accept
+ * Both tools offer exactly three formats, so these are the three types that can
+ * be a legitimate answer. Copying the upstream Content-Type through instead would
+ * put an arbitrary upstream string into the MCP result, and would accept
  * `image/svg+xml` — active content the caller never asked for, handed to whatever
  * renders the result. `image/jpg` is a common alias but is deliberately absent:
  * nothing here has observed the API sending it, and an unverified alias is a
  * guess. A real capture should confirm the exact types before any is added.
+ * `image/webp` was confirmed that way on 2026-09-24: format=webp on example.com
+ * answered HTTP 200, `Content-Type: image/webp`, body `RIFF....WEBPVP8L`.
  */
-const SERVED_IMAGE_TYPES = Object.freeze(["image/png", "image/jpeg"]);
+const SERVED_IMAGE_TYPES = Object.freeze(["image/png", "image/jpeg", "image/webp"]);
 
 /**
  * A tool error carrying a stable machine-readable code.
@@ -329,8 +331,8 @@ export async function captureScreenshot(args, opts) {
         return captureError(
           CAPTURE_ERROR_CODES.unsupportedImageType,
           `Site-Shot could not return the screenshot (${CAPTURE_ERROR_CODES.unsupportedImageType}): the API ` +
-            `answered with an image type this server does not serve. Only PNG and JPEG are returned — request ` +
-            `format: "png" or format: "jpeg".`,
+            `answered with an image type this server does not serve. Only PNG, JPEG and WebP are returned — ` +
+            `request format: "png", "jpeg" or "webp".`,
         );
       }
       let read;

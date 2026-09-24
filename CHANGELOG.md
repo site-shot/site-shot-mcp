@@ -30,9 +30,13 @@ isn't one.
 - The upstream `Content-Type` was copied straight into the returned `mimeType`, so
   any `image/*` subtype the API sent became part of the MCP result — including
   `image/svg+xml`, which is active content no caller asked for, handed to whatever
-  renders the result. Both tools offer png and jpeg, so those two types are now the
-  only ones served; anything else is an `unsupported_image_type` error that does
-  not repeat the subtype back. `image/jpg` is deliberately *not* accepted: it is a
+  renders the result. Both tools offer png, jpeg and webp, so `image/png`,
+  `image/jpeg` and `image/webp` are now the only types served; anything else is an
+  `unsupported_image_type` error that does not repeat the subtype back.
+  `image/webp` is on the list because a real capture confirmed it (HTTP 200,
+  `Content-Type: image/webp`, lossless `RIFF....WEBPVP8L`); before 1.2.0 was
+  merged in, this branch refused it, which would have taken webp away from every
+  caller of this transport. `image/jpg` is deliberately *not* accepted: it is a
   common alias, but nothing here has observed the API sending it, and an unverified
   alias is a guess.
 

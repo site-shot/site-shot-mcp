@@ -281,4 +281,23 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/18 smoke checks passed`);
+// 19) A WebP capture comes back as image/webp with its bytes intact. The API answers
+// format=webp with lossless RIFF....WEBP (VP8L) and Content-Type image/webp; the served-type
+// allowlist has to let exactly that through, on stdio as on the remote transport.
+{
+  const WEBP = Buffer.from("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==", "base64"); // 1x1 lossless
+  let calledUrl = "";
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return fakeImageResponse(WEBP, "image/webp");
+  };
+  const res = await captureScreenshot({ url: "https://example.com", format: "webp" }, { apiKey: "K", fetchImpl });
+  assert.equal(new URL(calledUrl).searchParams.get("format"), "webp", "the API is asked for webp");
+  assert.equal(res.isError, undefined, "a WebP capture is not refused");
+  assert.equal(res.content[0].type, "image");
+  assert.equal(res.content[0].mimeType, "image/webp");
+  assert.equal(Buffer.from(res.content[0].data, "base64").toString("hex"), WEBP.toString("hex"));
+  passed++;
+}
+
+console.log(`ok — ${passed}/19 smoke checks passed`);

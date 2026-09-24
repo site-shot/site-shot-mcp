@@ -35,6 +35,11 @@ import { createUdsWorker, configFromEnv } from "../src/uds-worker.js";
 import { captureScreenshot } from "../src/server.js";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// A complete 1x1 lossless WebP: RIFF <size> WEBP, then a VP8L chunk. That is the
+// shape the live API answers `format=webp` with -- measured 2026-09-24 on
+// example.com: HTTP 200, `Content-Type: image/webp` with no parameters, body
+// starting `RIFF....WEBPVP8L`.
+const WEBP = Buffer.from("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==", "base64");
 
 // The worker must never read this, on any path, for any reason.
 const POISON_ENV_KEY = "POISON_ENV_KEY_MUST_NEVER_BE_SENT";
@@ -1784,12 +1789,15 @@ test("back-to-back requests at the concurrency limit are never spuriously refuse
 // Independent security review: the upstream Content-Type was copied straight into
 // the MCP result's mimeType. That reflects whatever the header says — a marker, or
 // `image/svg+xml`, which is active content the caller never asked for. The two
-// tools offer png and jpeg; those are the two types that may come back.
+// tools offer png, jpeg and webp; those are the three types that may come back,
+// and anything else -- tiff included, which the API once sent as a 404 body --
+// is still refused.
 test("only the image types the tools actually offer are served", async (t) => {
   const MARKER = "SYNTH_MIME_SECRET";
   const logged = [];
   let contentType = "image/png";
-  const { fetchImpl } = makeFetch(() => okImage(PNG, contentType));
+  let body = PNG;
+  const { fetchImpl, calls } = makeFetch(() => okImage(body, contentType));
   const { config } = await withWorker(t, { fetchImpl, logger: (line) => logged.push(line) });
 
   for (const good of ["image/png", "image/jpeg", "image/png; charset=binary"]) {
@@ -1800,7 +1808,20 @@ test("only the image types the tools actually offer are served", async (t) => {
     assert.equal(res.json.result.content[0].mimeType, good.split(";")[0], `${good} keeps its exact type`);
   }
 
-  for (const bad of [`image/${MARKER}`, "image/svg+xml", "image/webp", "image/gif", "image/svg+xml; charset=utf-8"]) {
+  // A WebP capture, end to end: the caller asks for format "webp", the upstream
+  // is asked for format=webp, and the RIFF....WEBP bytes come back whole as
+  // image/webp -- not refused, and not relabelled as some other type.
+  contentType = "image/webp";
+  body = WEBP;
+  const webp = await rpc(config.socketPath, JSON.parse(callBody(1, { url: "https://example.com", format: "webp" })));
+  assert.equal(new URL(calls.at(-1).url).searchParams.get("format"), "webp", "the upstream is asked for webp");
+  assert.equal(webp.json.result.isError, undefined, "a WebP capture is served, not refused");
+  assert.equal(webp.json.result.content[0].type, "image");
+  assert.equal(webp.json.result.content[0].mimeType, "image/webp", "and served as image/webp");
+  assert.deepEqual(Buffer.from(webp.json.result.content[0].data, "base64"), WEBP, "with its bytes intact");
+  body = PNG;
+
+  for (const bad of [`image/${MARKER}`, "image/svg+xml", "image/tiff", "image/gif", "image/svg+xml; charset=utf-8"]) {
     contentType = bad;
     const res = await rpc(config.socketPath, JSON.parse(callBody(1)));
     assert.equal(res.json.result.isError, true, `${bad} must not be served`);
@@ -1833,6 +1854,11 @@ test("the capture function itself refuses an unexpected image type", async () =>
   assert.equal(res.isError, true);
   assert.equal(res._meta["com.site-shot.mcp/error"].code, "unsupported_image_type");
   assert.ok(!JSON.stringify(res).includes("SYNTH_MIME_SECRET"), "the subtype is not reflected");
+  // The refusal tells the agent what to ask for instead, so it has to name every
+  // format the tools offer -- a list that omits one steers agents away from it.
+  for (const format of ["png", "jpeg", "webp"]) {
+    assert.ok(res.content[0].text.includes(`"${format}"`), `the refusal offers format "${format}"`);
+  }
 });
 
 // ---------------------------------------------------------------------------
