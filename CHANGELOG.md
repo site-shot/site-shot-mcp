@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Not published. The stdio server and the released `site-shot-mcp@1.1.2` plugin
+Not published. The stdio server and the released `site-shot-mcp@1.2.0` plugin
 manifests are unchanged; nothing here advertises a remote endpoint, because there
 isn't one.
 
@@ -35,8 +35,6 @@ isn't one.
   not repeat the subtype back. `image/jpg` is deliberately *not* accepted: it is a
   common alias, but nothing here has observed the API sending it, and an unverified
   alias is a guess.
-- The MCP handshake reported version 1.1.1 while the package was 1.1.2. The
-  handshake now reads the version from the manifest, so the two cannot drift again.
 
 ### Added
 
@@ -68,6 +66,27 @@ isn't one.
   the one function whose job is enforcing the first.
 - Dependencies are pinned exactly (`@modelcontextprotocol/sdk` 1.29.0, `zod`
   3.25.76) and the lockfile root version now matches the package.
+
+## 1.2.0 — 2026-09-24
+
+### Added
+
+- `format` accepts `"webp"`: lossless, about 35% smaller than png on the median page; limited to 16,383 px per side.
+
+## 1.1.3
+
+### Fixed
+
+- The server told every client the wrong version of itself. `serverInfo.version`
+  was a literal in `src/server.js` that a release had to remember to update
+  separately, and 1.1.2 went to npm while the handshake kept answering `1.1.1`.
+  That is the version a client reports and a directory reviewer reads, so the
+  package misrepresented itself everywhere it was installed. The version is now
+  read from `package.json`, so there is no second place to update, and a test
+  asserts over a real MCP session that the handshake, the MCPB manifest and the
+  MCP Registry entry all state the package's own version.
+
+No request the server makes, no tool, no schema and no default has changed.
 
 ## 1.1.2
 

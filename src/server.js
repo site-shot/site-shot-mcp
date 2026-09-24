@@ -1,11 +1,16 @@
-import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-// The handshake version is read from the manifest rather than restated here: the
-// two drifted apart once already (package 1.1.2 against a 1.1.1 handshake), and a
-// version an agent reads is exactly the kind of claim that must not be hand-kept.
-const { version: SERVER_VERSION } = createRequire(import.meta.url)("../package.json");
+// Read from package.json rather than repeating the number here. A literal in this file
+// is a second place a release has to remember to touch, and it was already missed once:
+// 1.1.2 shipped to npm while the handshake kept answering 1.1.1, so every client and
+// every directory reviewer was told the wrong version by the server itself. package.json
+// is always present in the published tarball, and `src/` sits one level below it both in
+// the repo and in an installed node_modules copy.
+const { version: PACKAGE_VERSION } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
 
 const API_BASE = "https://api.site-shot.com/";
 const REQUEST_TIMEOUT_MS = 90_000; // Site-Shot renders can take up to ~70s on heavy pages.
@@ -430,7 +435,11 @@ const baseInputShape = {
       "Viewport height in pixels. If omitted, the Site-Shot API's own default applies — pass a " +
         "value whenever the exact size matters.",
     ),
-  format: z.enum(["png", "jpeg"]).optional().describe("Image format. Default: png."),
+  format: z.enum(["png", "jpeg", "webp"]).optional().describe(
+    "Image format. Default: png. png and webp are lossless; webp is typically about 35% smaller than png. " +
+      "jpeg is lossy and smallest on photo-heavy pages. WebP cannot exceed 16,383 px on a side: " +
+      "a taller full-page capture comes back cut at 16,383 px from the top.",
+  ),
   block_ads: z.boolean().optional().describe("Remove ads for a cleaner screenshot. Default: true."),
   block_cookie_banners: z
     .boolean()
@@ -496,7 +505,7 @@ export function createServer(opts = {}) {
 
   const server = new McpServer({
     name: "site-shot",
-    version: SERVER_VERSION,
+    version: PACKAGE_VERSION,
   });
 
   server.registerTool(
