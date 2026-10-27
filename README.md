@@ -180,10 +180,7 @@ local-name collision.
 Works the same way in any MCP client (Cursor, Cline, VS Code, LangChain, CrewAI) — point the client at
 `npx -y site-shot-mcp` with `SITESHOT_API_KEY` in the environment.
 
-Every integration above runs the same local stdio server, and that package is published on npm and
-in the official MCP Registry. It is **not listed** in the shared ChatGPT/Codex public plugin
-directory or in Claude's remote connector directory: both of those routes take a hosted HTTPS MCP
-endpoint, which Site-Shot has not deployed. Doing so is a separate decision.
+Every integration above runs the same local stdio server, published on npm and in the official MCP Registry. Hosted HTTPS MCP is a separate deployment and client-compatibility path, not something these plugin install commands configure. Publication here does not imply listing in the shared ChatGPT/Codex public plugin directory or Claude's remote connector directory.
 
 ## Tools
 
