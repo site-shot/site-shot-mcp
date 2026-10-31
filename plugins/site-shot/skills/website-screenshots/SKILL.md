@@ -12,7 +12,9 @@ country.
 
 ## Before the first capture
 
-Site-Shot requires a paid API plan; captures use that account's existing API allowance and limits.
+The API key needs either the free API trial — 100 captures a month on a confirmed account, no card
+needed — or a paid plan (from $5/mo for 2,000). Trial captures come from the default location or the
+US; other countries need a paid plan. Captures use that account's API allowance and limits.
 The key reaches the server as `SITESHOT_API_KEY`, and how it gets there is the host's business, not
 this skill's. In Claude Code it is a required plugin setting the person fills in themselves with
 `/plugin configure site-shot@site-shot`. Under Codex it is forwarded from the environment of the

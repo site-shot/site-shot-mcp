@@ -6,8 +6,12 @@ with [Site-Shot](https://www.site-shot.com/) over the [Model Context Protocol](h
 Real Chromium rendering · full-page capture · country proxies · automatic **ad & cookie-banner removal**
 (cleaner images, fewer vision tokens).
 
-A Site-Shot API key is required, and it takes a paid Site-Shot API plan: captures draw on that
-account's existing API allowance and limits. The key comes from your
+A Site-Shot API key is required. A confirmed account's API key comes with a free API trial of 100
+captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Accounts confirmed
+before 2026-10-30 start the trial with one button on <https://www.site-shot.com/start/>; an account
+that has had a paid plan before does not get it. Trial captures come from the default location or
+the US; other countries need a paid plan. Captures draw on that account's API allowance and limits.
+Get the key at <https://www.site-shot.com/start/> or from your
 [Site-Shot dashboard](https://www.site-shot.com/dashboard/); [pricing](https://www.site-shot.com/pricing/)
 lists the plans. The no-signup browser tool at <https://www.site-shot.com/> is for checking output
 quality; it does not issue keys.
@@ -106,7 +110,7 @@ before that, point `codex plugin marketplace add` at a local checkout path inste
 
 Installing is not the same as being configured, and neither is the same as a capture succeeding.
 Installation only puts the manifests in place. The server still needs the key below, and a capture
-still needs a Site-Shot plan with allowance left on it.
+still needs allowance left on that key's account, from the free API trial or a paid plan.
 
 ### The API key
 

@@ -37,6 +37,15 @@ const codexMarketplace = readJson(".agents", "plugins", "marketplace.json");
 const codexEntry = codexMarketplace.plugins?.[0];
 const codexPlugin = readJson(pluginDir, ".codex-plugin", "plugin.json");
 
+// What a key needs: a confirmed account's key comes with the free API trial (100 captures
+// a month, no card), or the account has a paid plan. The trial is a trial, not a free tier:
+// "free tier", "free plan", "free key", "free credits" or "unlimited" would promise more than
+// it gives, and a bare "free trial" drifts from the name the site uses ("free API trial").
+const FREE_TIER_CLAIM = /\bfree\s+(?:trial|tier|api\s+key|key|plan|credits|forever)\b|\bunlimited\b/i;
+// The trial renders from the default location or the US only. This package exposes
+// `country`, so any copy that offers the trial says other countries need a paid plan.
+const TRIAL_LOCATION_BOUND = /\bdefault\s+location\s+or\s+the\s+US\b[^.]*\bother\s+countries\s+need\s+a\s+paid\s+plan\b/i;
+
 /** Every file under dir, as repo-relative POSIX paths. */
 function filesUnder(dir) {
   const out = [];
@@ -239,7 +248,9 @@ test("the Codex interface metadata is complete and claims nothing extra", () => 
 
   const copy = JSON.stringify(ui);
   assert.doesNotMatch(copy, /\bdirector(?:y|ies)\b|\bcatalog\b/i, "no claim of a directory listing");
-  assert.doesNotMatch(copy, /\bguarantee|\bfree (?:trial|tier|key|plan)\b/i, "no guarantee or free-tier claim");
+  assert.doesNotMatch(copy, /\bguarantee/i, "no guarantee");
+  assert.doesNotMatch(copy, FREE_TIER_CLAIM, "the free API trial is not called a free tier, plan or key");
+  assert.match(ui.longDescription, TRIAL_LOCATION_BOUND, "no geotargeting implied on the trial");
   assert.doesNotMatch(copy, /\bsigns? you in\b|\bauthenticates?\b|\blogs? in\b/i, "no authentication claim");
 });
 
@@ -272,18 +283,51 @@ test("the plugin asks Claude Code for the key as required sensitive config", () 
   assert.equal(cfg.title, "Site-Shot API key");
   assert.equal(cfg.sensitive, true, "sensitive: the value is masked, not echoed back");
   assert.equal(cfg.required, true, "required: enabling without a key fails loudly");
-  assert.match(cfg.description, /\bpaid\b/i, "the prompt states the API is paid before anyone types a key");
-  assert.doesNotMatch(cfg.description, /\bfree (?:trial|tier|api key|key|plan)\b/i, "no free-API-trial claim");
+  // Before anyone types a key, the prompt says what the key needs.
+  assert.match(
+    cfg.description,
+    /\bconfirmed\s+account\b[^.]*\bfree\s+API\s+trial\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bno\s+card\b/i,
+    "the prompt names the free API trial: 100 captures a month on a confirmed account, no card",
+  );
+  assert.match(cfg.description, /\bpaid\s+plans?\b/i, "and the paid plans as the way past it");
+  assert.match(cfg.description, TRIAL_LOCATION_BOUND, "no geotargeting implied on the trial");
+  assert.doesNotMatch(cfg.description, FREE_TIER_CLAIM, "the free API trial is not called a free tier, plan or key");
 
-  // Keys are managed in the dashboard. /start/ is the signup path and /pricing/ sells
-  // plans; sending someone there to find an existing key is a dead end.
-  assert.match(cfg.description, /https:\/\/www\.site-shot\.com\/dashboard\//, "key management link is the dashboard");
-  assert.doesNotMatch(cfg.description, /site-shot\.com\/start\//, "not the signup path");
+  // Where to find an existing key: /start/ shows a signed-in user's key already filled in,
+  // and the dashboard manages keys. Either works; /pricing/ alone sells plans and shows no key.
+  assert.match(
+    cfg.description,
+    /https:\/\/www\.site-shot\.com\/(?:start|dashboard)\//,
+    "the key link is /start/ or the dashboard",
+  );
 
   // A default would be a key someone shipped, and a fallback would quietly capture
   // against the wrong account rather than stopping.
   assert.equal(cfg.default, undefined, "no default value");
   assert.equal(cfg.options, undefined, "not an enum");
+});
+
+// The MCPB bundle (manifest.json) and the MCP Registry entry (server.json) ask for the same
+// key in their own words and offer the free API trial too, so they owe the same bounds as the
+// Claude Code prompt: the trial named as the site names it, the location bound stated, and
+// never a free tier, plan or key.
+test("the MCPB and MCP Registry key descriptions offer the trial with its bounds", () => {
+  const descriptions = {
+    "manifest.json user_config.api_key": readJson("manifest.json").user_config?.api_key?.description,
+    "server.json SITESHOT_API_KEY": readJson("server.json")
+      .packages?.flatMap((p) => p.environmentVariables ?? [])
+      .find((v) => v.name === "SITESHOT_API_KEY")?.description,
+  };
+  for (const [where, description] of Object.entries(descriptions)) {
+    assert.equal(typeof description, "string", `${where} has a description`);
+    assert.match(
+      description,
+      /\bconfirmed\s+account\b[^.]*\bfree\s+API\s+trial\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bno\s+card\b/i,
+      `${where} names the free API trial: 100 captures a month on a confirmed account, no card`,
+    );
+    assert.match(description, TRIAL_LOCATION_BOUND, `${where}: no geotargeting implied on the trial`);
+    assert.doesNotMatch(description, FREE_TIER_CLAIM, `${where}: the free API trial is not called a free tier, plan or key`);
+  }
 });
 
 test("the API key is forwarded as a placeholder, never embedded", () => {
@@ -424,12 +468,22 @@ test("format accepts png, jpeg and webp, rejects tiff and jpg, and documents web
   await client.close();
 });
 
-test("the skill states the paid requirement and claims nothing it cannot do", () => {
+test("the skill states what the key needs and claims nothing it cannot do", () => {
   const skill = read(`${pluginDir}/skills/website-screenshots/SKILL.md`);
 
   assert.match(skill, /SITESHOT_API_KEY/, "names the variable the user has to set");
-  assert.match(skill, /\bpaid\b/i, "says the key is paid before the first call");
-  assert.doesNotMatch(skill, /\bfree (?:trial|tier|api key|key|plan)\b/i, "no free-API-trial claim");
+  // Before the first call: the free API trial on a confirmed account, or a paid plan.
+  const from = skill.indexOf("## Before the first capture");
+  const to = skill.indexOf("## Capturing");
+  assert.ok(from > -1 && to > from, "the skill keeps its \"Before the first capture\" section");
+  const before = skill.slice(from, to);
+  assert.match(
+    before,
+    /\bfree\s+API\s+trial\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bconfirmed\s+account\b[^.]*\bno\s+card\b[^.]*\bpaid\s+plan\b/i,
+    "says before the first call that the key needs the free API trial or a paid plan",
+  );
+  assert.match(before, TRIAL_LOCATION_BOUND, "no geotargeting implied on the trial");
+  assert.doesNotMatch(skill, FREE_TIER_CLAIM, "the free API trial is not called a free tier, plan or key");
 
   // Point at the command the installer itself names, not at an enable-time prompt nobody
   // has observed. And the skill must not carry the direct-stdio tool-error behaviour over

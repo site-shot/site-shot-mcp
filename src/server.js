@@ -28,7 +28,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
           type: "text",
           text:
             "Missing Site-Shot API key. Set the SITESHOT_API_KEY environment variable " +
-            "(get a key at https://www.site-shot.com/pricing/).",
+            "(get a key at https://www.site-shot.com/start/).",
         },
       ],
     };
@@ -228,7 +228,9 @@ const baseInputShape = {
     .describe(
       'Render through a proxy in this country, given as a two-letter ISO 3166-1 alpha-2 code — ' +
         '"DE" for Germany, "FR" for France, "JP" for Japan. Full country names are not accepted. ' +
-        'Auto-sets IP, language, time zone and geolocation. Full list: https://www.site-shot.com/countries',
+        'Auto-sets IP, language, time zone and geolocation. On the free API trial only the default ' +
+        'location (no country) or "US" works; other countries need a paid plan. ' +
+        'Full list: https://www.site-shot.com/countries',
     ),
   strict_country: z
     .boolean()

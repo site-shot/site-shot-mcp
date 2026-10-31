@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "Site-Shot Screenshots",
     "shortDescription": "Screenshot public web pages, including from another country",
-    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. Requires a paid Site-Shot API plan; captures use that account's existing API allowance and limits.",
+    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. A confirmed account's API key comes with a free API trial of 100 captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Trial captures come from the default location or the US; other countries need a paid plan.",
     "developerName": "Site-Shot",
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Read"],

@@ -21,7 +21,7 @@
       "environmentVariables": [
         {
           "name": "SITESHOT_API_KEY",
-          "description": "Site-Shot API key (the userkey). Get one at https://www.site-shot.com/pricing/",
+          "description": "Site-Shot API key (the userkey). Get one at https://www.site-shot.com/start/ (a confirmed account's key comes with a free API trial of 100 captures a month, no card needed; trial captures come from the default location or the US, other countries need a paid plan)",
           "isRequired": true,
           "isSecret": true
         }

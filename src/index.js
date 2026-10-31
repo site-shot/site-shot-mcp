@@ -8,7 +8,7 @@ async function main() {
     // start the server before the user has finished configuring the key.
     process.stderr.write(
       "[site-shot-mcp] Warning: SITESHOT_API_KEY is not set. " +
-        "Get a key at https://www.site-shot.com/pricing/ and add it to the server's env.\n",
+        "Get a key at https://www.site-shot.com/start/ and add it to the server's env.\n",
     );
   }
 

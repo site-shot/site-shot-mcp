@@ -23,7 +23,7 @@
     "SITESHOT_API_KEY": {
       "type": "string",
       "title": "Site-Shot API key",
-      "description": "Your Site-Shot API key (sent to the API as userkey). Requires a paid Site-Shot API plan; captures use that account's existing API allowance and limits. Get the key from your Site-Shot dashboard (https://www.site-shot.com/dashboard/); plans are listed at https://www.site-shot.com/pricing/.",
+      "description": "Your Site-Shot API key (sent to the API as userkey). A confirmed account's API key comes with a free API trial of 100 captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Trial captures come from the default location or the US; other countries need a paid plan. Get the key from your Site-Shot dashboard (https://www.site-shot.com/dashboard/); plans are listed at https://www.site-shot.com/pricing/.",
       "sensitive": true,
       "required": true
     }

@@ -12,7 +12,7 @@
       "name": "site-shot",
       "source": "./plugins/site-shot",
       "displayName": "Site-Shot Screenshots",
-      "description": "Let Claude Code see public web pages: real Chromium rendering, full-page capture, country proxies, and automatic ad & cookie-banner removal. Runs the published site-shot-mcp package over stdio and requires a paid Site-Shot API plan.",
+      "description": "Let Claude Code see public web pages: real Chromium rendering, full-page capture, country proxies, and automatic ad & cookie-banner removal. Runs the published site-shot-mcp package over stdio and needs a Site-Shot API key: a confirmed account's key comes with a free API trial of 100 captures a month (no card; default location or the US only), and paid plans from $5/mo add volume and other countries.",
       "version": "1.2.0",
       "author": {
         "name": "Site-Shot",
