@@ -37,14 +37,19 @@ const codexMarketplace = readJson(".agents", "plugins", "marketplace.json");
 const codexEntry = codexMarketplace.plugins?.[0];
 const codexPlugin = readJson(pluginDir, ".codex-plugin", "plugin.json");
 
-// What a key needs: a confirmed account's key comes with the free API trial (100 captures
-// a month, no card), or the account has a paid plan. The trial is a trial, not a free tier:
-// "free tier", "free plan", "free key", "free credits" or "unlimited" would promise more than
-// it gives, and a bare "free trial" drifts from the name the site uses ("free API trial").
-const FREE_TIER_CLAIM = /\bfree\s+(?:trial|tier|api\s+key|key|plan|credits|forever)\b|\bunlimited\b/i;
-// The trial renders from the default location or the US only. This package exposes
-// `country`, so any copy that offers the trial says other countries need a paid plan.
-const TRIAL_LOCATION_BOUND = /\bdefault\s+location\s+or\s+the\s+US\b[^.]*\bother\s+countries\s+need\s+a\s+paid\s+plan\b/i;
+// What a key needs: a confirmed account's key comes with the free plan (100 API captures a
+// month, no card), or the account has a paid plan. "Free plan" is the name the site uses. It
+// renews every month with no end date, so it is not a trial; and it is a bounded plan, so
+// "free tier", "free key", "free credits", "forever", "unlimited", "generous", "lifetime" or
+// "no expiry" would each promise more than it gives.
+const FREE_PLAN_OVERCLAIM =
+  /\btrial\b|\bfree\s+(?:tier|api\s+key|key|credits)\b|\bforever\b|\bunlimited\b|\bgenerous\b|\blifetime\b|\bno\s+expiry\b/i;
+// The free plan, named as the site names it, with its three facts in one sentence.
+const FREE_PLAN_OFFER =
+  /\bconfirmed\s+account\b[^.]*\bfree\s+plan\b[^.]*\b100\s+(?:API\s+)?captures\s+a\s+month\b[^.]*\bno\s+card\b/i;
+// The free plan renders from the default location or the US only. This package exposes
+// `country`, so any copy that offers the free plan says other countries need a paid plan.
+const FREE_PLAN_LOCATION_BOUND = /\bdefault\s+location\s+or\s+the\s+US\b[^.]*\bother\s+countries\s+need\s+a\s+paid\s+plan\b/i;
 
 /** Every file under dir, as repo-relative POSIX paths. */
 function filesUnder(dir) {
@@ -249,8 +254,9 @@ test("the Codex interface metadata is complete and claims nothing extra", () => 
   const copy = JSON.stringify(ui);
   assert.doesNotMatch(copy, /\bdirector(?:y|ies)\b|\bcatalog\b/i, "no claim of a directory listing");
   assert.doesNotMatch(copy, /\bguarantee/i, "no guarantee");
-  assert.doesNotMatch(copy, FREE_TIER_CLAIM, "the free API trial is not called a free tier, plan or key");
-  assert.match(ui.longDescription, TRIAL_LOCATION_BOUND, "no geotargeting implied on the trial");
+  assert.match(ui.longDescription, FREE_PLAN_OFFER, "the listing names the free plan: 100 captures a month, no card");
+  assert.doesNotMatch(copy, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
+  assert.match(ui.longDescription, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
   assert.doesNotMatch(copy, /\bsigns? you in\b|\bauthenticates?\b|\blogs? in\b/i, "no authentication claim");
 });
 
@@ -286,12 +292,12 @@ test("the plugin asks Claude Code for the key as required sensitive config", () 
   // Before anyone types a key, the prompt says what the key needs.
   assert.match(
     cfg.description,
-    /\bconfirmed\s+account\b[^.]*\bfree\s+API\s+trial\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bno\s+card\b/i,
-    "the prompt names the free API trial: 100 captures a month on a confirmed account, no card",
+    FREE_PLAN_OFFER,
+    "the prompt names the free plan: 100 captures a month on a confirmed account, no card",
   );
   assert.match(cfg.description, /\bpaid\s+plans?\b/i, "and the paid plans as the way past it");
-  assert.match(cfg.description, TRIAL_LOCATION_BOUND, "no geotargeting implied on the trial");
-  assert.doesNotMatch(cfg.description, FREE_TIER_CLAIM, "the free API trial is not called a free tier, plan or key");
+  assert.match(cfg.description, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
+  assert.doesNotMatch(cfg.description, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
 
   // Where to find an existing key: /start/ shows a signed-in user's key already filled in,
   // and the dashboard manages keys. Either works; /pricing/ alone sells plans and shows no key.
@@ -308,10 +314,10 @@ test("the plugin asks Claude Code for the key as required sensitive config", () 
 });
 
 // The MCPB bundle (manifest.json) and the MCP Registry entry (server.json) ask for the same
-// key in their own words and offer the free API trial too, so they owe the same bounds as the
-// Claude Code prompt: the trial named as the site names it, the location bound stated, and
-// never a free tier, plan or key.
-test("the MCPB and MCP Registry key descriptions offer the trial with its bounds", () => {
+// key in their own words and offer the free plan too, so they owe the same bounds as the
+// Claude Code prompt: the free plan named as the site names it, the location bound stated, and
+// never a trial, a free tier or a free key.
+test("the MCPB and MCP Registry key descriptions offer the free plan with its bounds", () => {
   const descriptions = {
     "manifest.json user_config.api_key": readJson("manifest.json").user_config?.api_key?.description,
     "server.json SITESHOT_API_KEY": readJson("server.json")
@@ -322,11 +328,11 @@ test("the MCPB and MCP Registry key descriptions offer the trial with its bounds
     assert.equal(typeof description, "string", `${where} has a description`);
     assert.match(
       description,
-      /\bconfirmed\s+account\b[^.]*\bfree\s+API\s+trial\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bno\s+card\b/i,
-      `${where} names the free API trial: 100 captures a month on a confirmed account, no card`,
+      FREE_PLAN_OFFER,
+      `${where} names the free plan: 100 captures a month on a confirmed account, no card`,
     );
-    assert.match(description, TRIAL_LOCATION_BOUND, `${where}: no geotargeting implied on the trial`);
-    assert.doesNotMatch(description, FREE_TIER_CLAIM, `${where}: the free API trial is not called a free tier, plan or key`);
+    assert.match(description, FREE_PLAN_LOCATION_BOUND, `${where}: no geotargeting implied on the free plan`);
+    assert.doesNotMatch(description, FREE_PLAN_OVERCLAIM, `${where}: the free plan is not called a trial, a free tier or a free key`);
   }
 });
 
@@ -472,18 +478,18 @@ test("the skill states what the key needs and claims nothing it cannot do", () =
   const skill = read(`${pluginDir}/skills/website-screenshots/SKILL.md`);
 
   assert.match(skill, /SITESHOT_API_KEY/, "names the variable the user has to set");
-  // Before the first call: the free API trial on a confirmed account, or a paid plan.
+  // Before the first call: the free plan on a confirmed account, or a paid plan.
   const from = skill.indexOf("## Before the first capture");
   const to = skill.indexOf("## Capturing");
   assert.ok(from > -1 && to > from, "the skill keeps its \"Before the first capture\" section");
   const before = skill.slice(from, to);
   assert.match(
     before,
-    /\bfree\s+API\s+trial\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bconfirmed\s+account\b[^.]*\bno\s+card\b[^.]*\bpaid\s+plan\b/i,
-    "says before the first call that the key needs the free API trial or a paid plan",
+    /\bfree\s+plan\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bconfirmed\s+account\b[^.]*\bno\s+card\b[^.]*\bpaid\s+plan\b/i,
+    "says before the first call that the key needs the free plan or a paid plan",
   );
-  assert.match(before, TRIAL_LOCATION_BOUND, "no geotargeting implied on the trial");
-  assert.doesNotMatch(skill, FREE_TIER_CLAIM, "the free API trial is not called a free tier, plan or key");
+  assert.match(before, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
+  assert.doesNotMatch(skill, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
 
   // Point at the command the installer itself names, not at an enable-time prompt nobody
   // has observed. And the skill must not carry the direct-stdio tool-error behaviour over
@@ -721,7 +727,13 @@ test("README is honest about where this is and is not distributed", () => {
 
   // Name the two routes that actually need a hosted endpoint. "Public directories
   // require HTTPS" would be false: the MCP Registry lists this stdio package today.
-  assert.match(readme, /not listed[\s\S]{0,200}?\bdirectory\b/i, "states plainly that those listings do not exist");
+  // The README (2026-10-27) says publication "does not imply listing" in those directories
+  // rather than "is not listed": either disclaims the listing; neither may be dropped.
+  assert.match(
+    readme,
+    /\b(?:not listed|does not imply listing)\b[\s\S]{0,200}?\bdirectory\b/i,
+    "disclaims a listing in the ChatGPT/Codex and Claude connector directories",
+  );
   assert.match(readme, /hosted HTTPS/i, "names what those routes require");
   assert.doesNotMatch(
     readme,
@@ -751,6 +763,8 @@ test("copy does not imply per-capture charges or promise every page", () => {
     // and a failed capture is not automatically a paid one.
     assert.doesNotMatch(text, /\bbilled\b|\bcharged\b|\bper[- ]capture (?:charge|cost|fee)\b/i, "no per-invocation billing claim");
     assert.doesNotMatch(text, /\bany (?:public )?web page\b/i, "no promise to capture any page whatsoever");
+    // The README and every listing, not only the key prompts: the free plan is never a trial.
+    assert.doesNotMatch(text, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
   }
 });
 

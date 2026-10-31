@@ -25,6 +25,24 @@ assert.match(
   "country param must document ISO codes, not full country names",
 );
 
+// `country` is where an agent decides to geotarget, so it is where the free plan's location
+// bound has to be stated: on a free-plan key every other country is refused with an error
+// instead of an image, and the refused request still counts toward the month. No status code is
+// named: the API answers that refusal as a JSON-mode 200 with an error body, a 403 in image mode,
+// and a known server bug can turn the 403 into an empty 404, so "403" here would be read as fact
+// and be wrong for some callers. Both tools share the schema; check both.
+for (const t of tools) {
+  const country = t.inputSchema.properties.country.description;
+  assert.match(
+    country,
+    /\bfree plan\b[^.]*\bdefault location\b[^.]*"US"[^.]*\bother countries need a paid plan\b/,
+    `${t.name}: country states the free plan's location bound`,
+  );
+  assert.match(country, /\bstill counts\b/, `${t.name}: country says a refused request still counts`);
+  assert.doesNotMatch(country, /\b(?:403|404|HTTP\s*\d{3})\b/i, `${t.name}: country names no status code for the refusal`);
+  assert.doesNotMatch(country, /\btrial\b/i, `${t.name}: the free plan is not called a trial`);
+}
+
 // The package forwards width/height/wait_ms only when the caller passes them, so the value
 // that applies otherwise belongs to the API and rots on its release cycle, not ours. Naming a
 // number here ships to agents as fact — which is how "default 1280" outlived being true. This

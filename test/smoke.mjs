@@ -281,4 +281,30 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/18 smoke checks passed`);
+// 19) The free plan's refusals reach the agent word for word. A spent month is a 403 from Kong in
+// every mode, and its message may start with either "Free API trial used up" (what the API sends
+// today) or "Free plan used up" (what it will send after the next server deploy); a client has to
+// accept both. A country refused on the free plan is a 403 here because this server asks for the
+// image, not response_type=json; its text after "Geotargeting needs a paid plan" will change. The
+// renewal date and the pricing link are what the agent passes on, so nothing here may match on one
+// prefix and rewrite or drop the other.
+{
+  const bodies = [
+    "Free plan used up: 100 captures this month. It renews on 2026-12-01 (UTC). " +
+      "For more, choose a paid plan: https://www.site-shot.com/pricing/",
+    "Free API trial used up: 100 captures this month. It renews on 2026-12-01 (UTC). " +
+      "For more, choose a paid plan: https://www.site-shot.com/pricing/",
+    "Geotargeting needs a paid plan: https://www.site-shot.com/pricing/",
+  ];
+  for (const message of bodies) {
+    for (const [body, type] of [[JSON.stringify({ error: message }), "application/json"], [message, "text/plain"]]) {
+      const fetchImpl = async () => fakeErrorResponse(403, body, type);
+      const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
+      assert.equal(res.isError, true, `403 is an error (${type})`);
+      assert.ok(res.content[0].text.includes(message), `403 body surfaced verbatim (${type}): ${message}`);
+    }
+  }
+  passed++;
+}
+
+console.log(`ok — ${passed}/19 smoke checks passed`);

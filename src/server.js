@@ -228,8 +228,10 @@ const baseInputShape = {
     .describe(
       'Render through a proxy in this country, given as a two-letter ISO 3166-1 alpha-2 code — ' +
         '"DE" for Germany, "FR" for France, "JP" for Japan. Full country names are not accepted. ' +
-        'Auto-sets IP, language, time zone and geolocation. On the free API trial only the default ' +
-        'location (no country) or "US" works; other countries need a paid plan. ' +
+        'Auto-sets IP, language, time zone and geolocation. On the Site-Shot free plan only the ' +
+        'default location (no country) or "US" works; other countries need a paid plan. Site-Shot ' +
+        'refuses them with an error instead of an image, and the refused request still counts ' +
+        'toward the month\'s captures. ' +
         'Full list: https://www.site-shot.com/countries',
     ),
   strict_country: z

@@ -1,6 +1,6 @@
 {
   "name": "site-shot",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
   "author": {
     "name": "Site-Shot",
@@ -15,14 +15,14 @@
   "mcpServers": {
     "site-shot": {
       "command": "npx",
-      "args": ["-y", "site-shot-mcp@1.2.0"],
+      "args": ["-y", "site-shot-mcp@1.2.1"],
       "env_vars": ["SITESHOT_API_KEY"]
     }
   },
   "interface": {
     "displayName": "Site-Shot Screenshots",
     "shortDescription": "Screenshot public web pages, including from another country",
-    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. A confirmed account's API key comes with a free API trial of 100 captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Trial captures come from the default location or the US; other countries need a paid plan.",
+    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. A confirmed account's API key comes with the free plan: 100 API captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Free-plan captures come from the default location or the US; other countries need a paid plan.",
     "developerName": "Site-Shot",
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Read"],

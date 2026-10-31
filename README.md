@@ -6,11 +6,13 @@ with [Site-Shot](https://www.site-shot.com/) over the [Model Context Protocol](h
 Real Chromium rendering · full-page capture · country proxies · automatic **ad & cookie-banner removal**
 (cleaner images, fewer vision tokens).
 
-A Site-Shot API key is required. A confirmed account's API key comes with a free API trial of 100
-captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Accounts confirmed
-before 2026-10-30 start the trial with one button on <https://www.site-shot.com/start/>; an account
-that has had a paid plan before does not get it. Trial captures come from the default location or
-the US; other countries need a paid plan. Captures draw on that account's API allowance and limits.
+A Site-Shot API key is required. A confirmed account's API key comes with the free plan: 100 API
+captures a month, no card needed; paid plans start at $5/mo for 2,000. The free plan renews every
+month; once its 100 captures are spent, the API answers 403 until it renews. Free-plan captures
+come from the default location or the US; other countries need a paid plan, and a request for one
+is refused but still counts toward the month. Accounts confirmed before 2026-10-30 switch the free
+plan on with one button on <https://www.site-shot.com/start/>; an account that has had a paid plan
+before does not get it. Captures draw on that account's API allowance and limits.
 Get the key at <https://www.site-shot.com/start/> or from your
 [Site-Shot dashboard](https://www.site-shot.com/dashboard/); [pricing](https://www.site-shot.com/pricing/)
 lists the plans. The no-signup browser tool at <https://www.site-shot.com/> is for checking output
@@ -94,7 +96,7 @@ it launches is the declared stdio MCP server.
 ## Codex CLI (plugin)
 
 This repository is also a Codex plugin marketplace. It installs the same plugin directory as Claude
-Code does — one shared skill, the same pinned `site-shot-mcp@1.2.0` over stdio — with its own
+Code does — one shared skill, the same pinned `site-shot-mcp@1.2.1` over stdio — with its own
 manifest, because the two hosts wire the credential differently.
 
 ### Install
@@ -110,14 +112,14 @@ before that, point `codex plugin marketplace add` at a local checkout path inste
 
 Installing is not the same as being configured, and neither is the same as a capture succeeding.
 Installation only puts the manifests in place. The server still needs the key below, and a capture
-still needs allowance left on that key's account, from the free API trial or a paid plan.
+still needs allowance left on that key's account, from the free plan or a paid plan.
 
 ### The API key
 
 Codex forwards the variable named in the plugin's descriptor:
 
 ```json
-{ "command": "npx", "args": ["-y", "site-shot-mcp@1.2.0"], "env_vars": ["SITESHOT_API_KEY"] }
+{ "command": "npx", "args": ["-y", "site-shot-mcp@1.2.1"], "env_vars": ["SITESHOT_API_KEY"] }
 ```
 
 `env_vars` is an allow-list of names, not values: no key appears in this descriptor, in the command
@@ -147,11 +149,11 @@ server. Pick one.
 ```toml
 [mcp_servers.site-shot]
 command = "npx"
-args = ["-y", "site-shot-mcp@1.2.0"]
+args = ["-y", "site-shot-mcp@1.2.1"]
 env_vars = ["SITESHOT_API_KEY"]
 ```
 
-`codex mcp add site-shot -- npx -y site-shot-mcp@1.2.0` writes that entry for you; add `env_vars`
+`codex mcp add site-shot -- npx -y site-shot-mcp@1.2.1` writes that entry for you; add `env_vars`
 afterwards, since `codex mcp add --env KEY=VALUE` would store the key in the file in clear text.
 Check it with `codex mcp get site-shot`. If you already have an entry like this and now install the
 plugin, remove the manual one deliberately with `codex mcp remove site-shot` — nothing here edits

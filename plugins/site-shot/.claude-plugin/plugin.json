@@ -1,7 +1,7 @@
 {
   "name": "site-shot",
   "displayName": "Site-Shot Screenshots",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
   "author": {
     "name": "Site-Shot",
@@ -23,7 +23,7 @@
     "SITESHOT_API_KEY": {
       "type": "string",
       "title": "Site-Shot API key",
-      "description": "Your Site-Shot API key (sent to the API as userkey). A confirmed account's API key comes with a free API trial of 100 captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Trial captures come from the default location or the US; other countries need a paid plan. Get the key from your Site-Shot dashboard (https://www.site-shot.com/dashboard/); plans are listed at https://www.site-shot.com/pricing/.",
+      "description": "Your Site-Shot API key (sent to the API as userkey). A confirmed account's API key comes with the free plan: 100 API captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Free-plan captures come from the default location or the US; other countries need a paid plan. Get the key from your Site-Shot dashboard (https://www.site-shot.com/dashboard/); plans are listed at https://www.site-shot.com/pricing/.",
       "sensitive": true,
       "required": true
     }

@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.2.1 — 2026-10-31
+
+Documentation and metadata only — no request the server makes has changed, and no tool,
+parameter or default has. What changed is what the key prompts and the tool schema tell a person
+or an agent about the key.
+
+### Changed
+
+- The API key comes with the free plan. Since 2026-10-30 a confirmed Site-Shot account's API key
+  includes 100 API captures a month, no card needed, renewed every month; paid plans start at
+  $5/mo for 2,000. 1.2.0 said the key takes a paid plan. The README, the skill, the Claude Code key
+  prompt, the Codex listing, the Claude Code marketplace entry, and the MCPB and MCP Registry key
+  descriptions now name the free plan instead. The README also says that accounts confirmed
+  before 2026-10-30 switch the free plan on with one button on https://www.site-shot.com/start/,
+  and that an account that has had a paid plan before does not get it.
+- The `country` description states the free plan's location bound: on the free plan only the
+  default location (no country) or `"US"` works, and Site-Shot refuses any other country with an
+  error instead of an image; the refused request still counts toward the month's captures. An
+  agent reads that before it calls, not after it has spent a capture.
+- The missing-key error and the startup warning point at https://www.site-shot.com/start/, which
+  shows a signed-in user's key already filled in, instead of /pricing/, which sells plans and shows
+  no key.
+
+### Tests
+
+- `test/plugin-metadata.test.mjs` requires the key prompts, the Codex listing and the skill to name
+  the free plan (100 captures a month, confirmed account, no card) with its location bound, and
+  checks the README and every listing for the old name and for words that would promise more than
+  the free plan gives.
+- `test/integration.mjs` asserts the served `country` description states the free plan's location
+  bound, that a refused request still counts, and that it names no status code for the refusal.
+- Smoke check 19 pins that the API's refusals for a spent free plan and for geotargeting reach the
+  agent word for word. For a spent month the API may use either wording, "Free API trial used up"
+  (what it sends today) or "Free plan used up"; both are checked.
+
 ## 1.2.0 — 2026-09-24
 
 ### Added
