@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A failed capture no longer reaches the agent as image bytes. In image mode the API can answer a
+  failure with an error-card PNG and no Content-Type — a `strict_country` request whose country
+  has no proxy right now is HTTP 404 with a 48 KB card (measured 2026-11-05). The error path read
+  that body as text, so the agent got about 47,000 characters of decoded PNG and no country hint;
+  `strict_country` is on by default whenever `country` is set. Image bodies are now never decoded:
+  the agent gets the status, and a 404 card on a strict country request names the country, the
+  countries page and `strict_country: false`.
+
+### Tests
+
+- Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and
+  without a country) and an empty 404 body. Check 20 fails on 1.2.1 with a 48,983-character
+  message.
+
 ## 1.2.1 — 2026-10-31
 
 Documentation and metadata only — no request the server makes has changed, and no tool,

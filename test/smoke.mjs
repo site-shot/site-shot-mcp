@@ -19,6 +19,18 @@ function fakeErrorResponse(status, body, contentType = "application/json") {
   };
 }
 
+// The production shape of an image-mode failure: no Content-Type, an error-card PNG body.
+function fakeCardResponse(status, bytes) {
+  return {
+    ok: false,
+    status,
+    headers: { get: () => null },
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    // A real Response has both; the 1.2.1 error path read text() and so decoded the card.
+    text: async () => Buffer.from(bytes).toString("utf8"),
+  };
+}
+
 let passed = 0;
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
 
@@ -307,4 +319,41 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/19 smoke checks passed`);
+// 20) A strict_country miss in image mode — HTTP 404, no Content-Type, a PNG error card —
+// must reach the agent as a sentence, not as the card's bytes decoded into text.
+{
+  const card = new Uint8Array(48939);
+  card.set(PNG, 0);
+  const fetchImpl = async () => fakeCardResponse(404, card);
+  const res = await captureScreenshot({ url: "https://example.com", country: "AQ" }, { apiKey: "K", fetchImpl });
+  const text = res.content[0].text;
+  assert.equal(res.isError, true);
+  assert.ok(text.length < 600, `short, readable error (got ${text.length} chars)`);
+  assert.doesNotMatch(text, /PNG|IHDR|\u0000/, "no image bytes in agent-visible text");
+  assert.match(text, /HTTP 404/);
+  assert.match(text, /"AQ"/, "names the country");
+  assert.match(text, /strict_country: false/, "offers the opt-out");
+  passed++;
+}
+
+// 21) The same card without a country carries no country advice and no "undefined".
+{
+  const card = new Uint8Array(64);
+  card.set(PNG, 0);
+  const fetchImpl = async () => fakeCardResponse(404, card);
+  const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
+  const text = res.content[0].text;
+  assert.match(text, /HTTP 404 \(the API answered with an error image/);
+  assert.doesNotMatch(text, /country|undefined/i);
+  passed++;
+}
+
+// 22) An empty 404 body (an unresolvable host, measured) keeps the bare status.
+{
+  const fetchImpl = async () => fakeCardResponse(404, new Uint8Array(0));
+  const res = await captureScreenshot({ url: "https://no-such-host.invalid" }, { apiKey: "K", fetchImpl });
+  assert.equal(res.content[0].text, "Site-Shot could not capture the screenshot: HTTP 404");
+  passed++;
+}
+
+console.log(`ok — ${passed}/22 smoke checks passed`);

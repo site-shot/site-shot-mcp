@@ -19,6 +19,17 @@ const REQUEST_TIMEOUT_MS = 90_000; // Site-Shot renders can take up to ~70s on h
  * Map friendly tool params to Site-Shot API query params and capture a screenshot.
  * Returns an MCP tool result ({ content, isError? }).
  */
+// The leading bytes of the image formats the API sends. A failed image-mode request can
+// answer with a PNG error card and no Content-Type at all (measured 2026-11-05: a
+// strict_country miss is HTTP 404 with a 48 KB PNG), so the header alone cannot tell an
+// agent-readable error from bytes that would arrive as tens of kilobytes of noise.
+function looksLikeImage(buf, contentType) {
+  if (contentType.startsWith("image/")) return true;
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+  return buf.length >= 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP";
+}
+
 export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   if (!apiKey) {
     return {
@@ -151,15 +162,27 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     };
   }
 
-  // Error path: surface whatever the API said (often a JSON or text error body).
+  // Error path: surface whatever the API said (often a JSON or text error body) — unless the
+  // body is an image. An error card is not text: decoded, it reached the agent as ~47,000
+  // characters of PNG and buried the only signal, the status.
   let detail = `HTTP ${res.status}`;
+  let errorImage = false;
   try {
-    const text = await res.text();
-    try {
-      const json = JSON.parse(text);
-      detail = json.error || json.message || text || detail;
-    } catch {
-      detail = text || detail;
+    const body =
+      typeof res.arrayBuffer === "function"
+        ? Buffer.from(await res.arrayBuffer())
+        : Buffer.from(await res.text(), "utf8");
+    if (looksLikeImage(body, contentType)) {
+      errorImage = true;
+      detail += " (the API answered with an error image, not a screenshot)";
+    } else {
+      const text = body.toString("utf8");
+      try {
+        const json = JSON.parse(text);
+        detail = json.error || json.message || text || detail;
+      } catch {
+        detail = text || detail;
+      }
     }
   } catch {
     /* keep status-only detail */
@@ -174,6 +197,13 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     detail += strictCountry
       ? `, or pass strict_country: false to render through a US proxy instead.`
       : `.`;
+  } else if (countryCode && strictCountry && errorImage && res.status === 404) {
+    // Image mode has no error field to match: this status-plus-card is the whole refusal.
+    detail +=
+      `. With strict_country on, this is what the API returns when no proxy is available for ` +
+      `country "${countryCode}" right now. Pick another country ` +
+      `(https://www.site-shot.com/countries), retry later, or pass strict_country: false to ` +
+      `render through a US proxy instead.`;
   }
   return {
     isError: true,
