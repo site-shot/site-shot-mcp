@@ -70,7 +70,7 @@ it launches is the declared stdio MCP server.
 
 ### Updating
 
-The plugin pins an exact `site-shot-mcp` release (now `site-shot-mcp@1.2.1`), so a new server
+The plugin pins an exact `site-shot-mcp` release (now `site-shot-mcp@1.2.2`), so a new server
 version reaches you through a plugin update:
 
 ```bash
@@ -83,7 +83,7 @@ Restart Claude Code afterwards.
 ## Codex CLI (plugin)
 
 This repository is also a Codex plugin marketplace. It installs the same plugin directory as Claude
-Code does — one shared skill, the same pinned `site-shot-mcp@1.2.1` over stdio — with its own
+Code does — one shared skill, the same pinned `site-shot-mcp@1.2.2` over stdio — with its own
 manifest, because the two hosts wire the credential differently.
 
 ### Install
@@ -102,7 +102,7 @@ and a capture still needs allowance left on that key's account, from the free pl
 Codex forwards the variable named in the plugin's descriptor:
 
 ```json
-{ "command": "npx", "args": ["-y", "site-shot-mcp@1.2.1"], "env_vars": ["SITESHOT_API_KEY"] }
+{ "command": "npx", "args": ["-y", "site-shot-mcp@1.2.2"], "env_vars": ["SITESHOT_API_KEY"] }
 ```
 
 `env_vars` is an allow-list of names, not values: no key appears in this descriptor, in the commands
@@ -158,11 +158,11 @@ server. Pick one.
 ```toml
 [mcp_servers.site-shot]
 command = "npx"
-args = ["-y", "site-shot-mcp@1.2.1"]
+args = ["-y", "site-shot-mcp@1.2.2"]
 env_vars = ["SITESHOT_API_KEY"]
 ```
 
-`codex mcp add site-shot -- npx -y site-shot-mcp@1.2.1` writes that entry for you; add `env_vars`
+`codex mcp add site-shot -- npx -y site-shot-mcp@1.2.2` writes that entry for you; add `env_vars`
 afterwards, since `codex mcp add --env KEY=VALUE` would store the key in the file in clear text.
 Check it with `codex mcp get site-shot`. If you already have an entry like this and now install the
 plugin, remove the manual one deliberately with `codex mcp remove site-shot` — nothing here edits
