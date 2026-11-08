@@ -592,12 +592,24 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
     });
     assert.equal(res.isError, true, `${name}: unknown arguments are an error`);
     const text = res.content[0].text;
-    assert.match(text, /"delay_time" \(use wait_ms\)/);
-    assert.match(text, /"full_size" \(use full_page/);
-    assert.match(text, /"no_ads" \(use block_ads/);
-    assert.match(text, /"made_up"/);
+    assert.match(text, /delay_time \(use wait_ms\)/);
+    assert.match(text, /no_ads \(use block_ads/);
+    assert.match(text, /made_up/);
     assert.match(text, /nothing was sent to Site-Shot/);
+    // Each tool names its own arguments: capture_full_page has no full_page to suggest.
+    const known = /Its arguments are ([^.]*)\./.exec(text)?.[1];
+    if (name === "capture_screenshot") {
+      assert.match(text, /full_size \(use full_page/);
+      assert.match(known, /\bfull_page\b/);
+    } else {
+      assert.match(text, /full_size \(not needed: this tool always captures the full page\)/);
+      assert.doesNotMatch(known, /\bfull_page\b/, "capture_full_page does not offer full_page");
+    }
   }
+  // The served schema is what clients and models read before calling: it has to say that extra
+  // keys are not taken (it said additionalProperties: true while the handler refused them).
+  const { tools } = await client.listTools();
+  for (const t of tools) assert.equal(t.inputSchema.additionalProperties, false, `${t.name}: no extra keys advertised`);
   assert.equal(fetched, false, "no capture was spent");
   const ok = await client.callTool({ name: "capture_screenshot", arguments: { url: "example.com", wait_ms: 500 } });
   assert.equal(ok.isError, undefined, "known arguments still capture");

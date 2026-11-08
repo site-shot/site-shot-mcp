@@ -116,23 +116,40 @@ const API_PARAM_HINTS = {
   key: "the key comes from the server's SITESHOT_API_KEY setting, never from an argument",
   response_type: "this server always returns the image itself",
 };
+// capture_full_page always captures the whole page, so it neither takes full_page nor needs full_size.
+const FULL_PAGE_TOOL_HINTS = {
+  full_size: "not needed: this tool always captures the full page",
+  full_page: "not needed: this tool always captures the full page",
+};
+
+/** The refusal for arguments a tool does not take, naming the right one where there is one. */
+function unknownArgumentsText(unknown, known, hints = API_PARAM_HINTS) {
+  const lines = unknown.map((k) => k + (hints[k] ? ` (${hints[k]})` : ""));
+  return (
+    `Not captured: this tool does not take ${lines.join(", ")}. Its arguments are ` +
+    `${known.join(", ")}. Call it again with those; nothing was sent to Site-Shot.`
+  );
+}
+
+// The served schema says additionalProperties: false, so a client or model that reads it knows
+// extra keys are not taken; the error map turns zod's "Unrecognized key(s)" into the refusal above.
+function toolInputSchema(shape, hints) {
+  const known = Object.keys(shape);
+  return z
+    .object(shape, {
+      errorMap: (issue, ctx) =>
+        issue.code === "unrecognized_keys"
+          ? { message: unknownArgumentsText(issue.keys, known, hints) }
+          : { message: ctx.defaultError },
+    })
+    .strict();
+}
 
 function unknownArgumentsError(args) {
-  const known = new Set([...Object.keys(baseInputShape), "full_page"]);
-  const unknown = Object.keys(args ?? {}).filter((k) => !known.has(k));
+  const known = [...Object.keys(baseInputShape), "full_page"];
+  const unknown = Object.keys(args ?? {}).filter((k) => !known.includes(k));
   if (unknown.length === 0) return null;
-  const lines = unknown.map((k) => `"${k}"` + (API_PARAM_HINTS[k] ? ` (${API_PARAM_HINTS[k]})` : ""));
-  return {
-    isError: true,
-    content: [
-      {
-        type: "text",
-        text:
-          `Not captured: this tool does not take ${lines.join(", ")}. Its arguments are ` +
-          `${[...known].join(", ")}. Call it again with those; nothing was sent to Site-Shot.`,
-      },
-    ],
-  };
+  return { isError: true, content: [{ type: "text", text: unknownArgumentsText(unknown, known) }] };
 }
 
 export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeoutMs = REQUEST_TIMEOUT_MS }) {
@@ -512,10 +529,7 @@ export function createServer(opts = {}) {
         "Take a screenshot of a web page with Site-Shot and return it as an image. Renders in a real " +
         "Chromium browser. Supports viewport/device sizing, full-page capture, country proxies, and " +
         "automatic ad & cookie-banner removal (cleaner image for the model to read).",
-      // passthrough, not the SDK's default strip: an unknown key has to reach the handler to be
-      // refused with a pointer to the right name, instead of vanishing from a capture that runs.
-      inputSchema: z
-        .object({
+      inputSchema: toolInputSchema({
         ...baseInputShape,
         full_page: z
           .boolean()
@@ -524,8 +538,7 @@ export function createServer(opts = {}) {
             "Capture the entire scrollable page instead of just the viewport. Default: false. A PNG " +
               "taller than 2000 px comes back as several image tiles, top to bottom (still one capture).",
           ),
-        })
-        .passthrough(),
+      }),
     },
     (args, extra) => captureScreenshot(args, { apiKey, fetchImpl, signal: extra?.signal }),
   );
@@ -539,7 +552,7 @@ export function createServer(opts = {}) {
         "it as an image. Convenience wrapper around capture_screenshot with full-page capture enabled. " +
         "A PNG taller than 2000 px comes back as several image tiles, top to bottom, so text stays " +
         "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down.",
-      inputSchema: z.object(baseInputShape).passthrough(),
+      inputSchema: toolInputSchema(baseInputShape, { ...API_PARAM_HINTS, ...FULL_PAGE_TOOL_HINTS }),
     },
     (args, extra) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal }),
   );

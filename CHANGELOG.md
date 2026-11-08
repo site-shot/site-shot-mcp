@@ -50,7 +50,8 @@
   `delay_time` -> `wait_ms`, `full_size` -> `full_page`, `no_ads` -> `block_ads`,
   `no_cookie_popup` -> `block_cookie_banners`. The schema used to drop unknown keys silently, so a
   call with the Site-Shot API's own names ran, and counted, as a capture without the wait or the
-  full page that was asked for.
+  full page that was asked for. The served schemas keep `additionalProperties: false`, so clients
+  and models still read that extra keys are not taken, and each tool lists its own arguments.
 
 ### Changed
 
