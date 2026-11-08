@@ -8,3 +8,5 @@ server.json
 .claude-plugin
 plugins
 .agents
+scripts
+DEVELOPMENT.md

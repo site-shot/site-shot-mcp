@@ -19,7 +19,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/server.js && node --check src/index.js",
+    "check": "node --check src/server.js && node --check src/index.js && node --check src/image-tiles.js",
     "smoke": "node test/smoke.mjs",
     "test:plugin": "node --test test/plugin-metadata.test.mjs",
     "sync:tessl": "node scripts/sync-tessl-plugin.mjs",
