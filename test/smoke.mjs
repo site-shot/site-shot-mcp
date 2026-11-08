@@ -674,4 +674,34 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/31 smoke checks passed`);
+// 32) A capture that outlasts the client's request timeout still arrives when the client resets
+// that timeout on progress: the server reports progress while the upstream request runs. The MCP
+// SDK client waits 60 s by default and a heavy render can take longer.
+{
+  const fetchImpl = async () => {
+    await new Promise((r) => setTimeout(r, 400));
+    return fakeImageResponse(PNG);
+  };
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer({ apiKey: "K", fetchImpl, progressIntervalMs: 50 });
+  const client = new Client({ name: "smoke", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const seen = [];
+  for (const name of ["capture_screenshot", "capture_full_page"]) {
+    const res = await client.callTool({ name, arguments: { url: "example.com" } }, undefined, {
+      timeout: 200,
+      resetTimeoutOnProgress: true,
+      onprogress: (p) => seen.push(p),
+    });
+    assert.equal(res.content[0].type, "image", `${name}: the capture arrives after the 200 ms timeout`);
+  }
+  assert.ok(seen.length >= 4, `progress was reported while capturing (got ${seen.length})`);
+  assert.match(seen[0].message, /Still capturing/);
+  // Without a progressToken the call completes as before.
+  const plain = await client.callTool({ name: "capture_screenshot", arguments: { url: "example.com" } });
+  assert.equal(plain.content[0].type, "image");
+  await client.close();
+  passed++;
+}
+
+console.log(`ok — ${passed}/32 smoke checks passed`);

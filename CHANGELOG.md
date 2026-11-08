@@ -51,7 +51,10 @@
   deadline. A client's cancellation (`notifications/cancelled`) now aborts the upstream request
   instead of leaving it running. The timeout message says the capture may still finish on
   Site-Shot's side and count toward the month, and a network error no longer echoes text that
-  could quote the request URL with the key in it.
+  could quote the request URL with the key in it. When a call carries a `progressToken`, the
+  server sends a progress notification every 15 s while the capture runs, so an MCP SDK client
+  that resets its timeout on progress (its default timeout is 60 s) keeps waiting for a slow
+  render. The 90-second deadline is unchanged.
 
 - An argument a tool does not take is refused before any capture, with the name to use:
   `delay_time` -> `wait_ms`, `full_size` -> `full_page`, `no_ads` -> `block_ads`,

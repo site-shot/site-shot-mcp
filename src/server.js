@@ -527,15 +527,38 @@ const baseInputShape = {
     .describe("Cap the captured height in pixels (max 20000)."),
 };
 
+// A capture can take longer than the 60 s an MCP SDK client waits by default. When the caller sent a
+// progressToken, a progress notification every so often lets a client that resets its timeout on
+// progress keep waiting; the deadline itself is unchanged.
+const PROGRESS_INTERVAL_MS = 15_000;
+
+function withProgress(extra, intervalMs, run) {
+  const progressToken = extra?._meta?.progressToken;
+  if (progressToken === undefined || typeof extra.sendNotification !== "function") return run();
+  let progress = 0;
+  const timer = setInterval(() => {
+    progress++;
+    extra
+      .sendNotification({
+        method: "notifications/progress",
+        params: { progressToken, progress, message: `Still capturing (${Math.round((progress * intervalMs) / 1000)} s)` },
+      })
+      .catch(() => {});
+  }, intervalMs);
+  return run().finally(() => clearInterval(timer));
+}
+
 /**
  * Build the Site-Shot MCP server.
  * @param {object} [opts]
  * @param {string} [opts.apiKey] Site-Shot API key (defaults to process.env.SITESHOT_API_KEY).
  * @param {function} [opts.fetchImpl] fetch implementation (defaults to global fetch) — injectable for tests.
+ * @param {number} [opts.progressIntervalMs] how often a running capture reports progress — injectable for tests.
  */
 export function createServer(opts = {}) {
   const apiKey = opts.apiKey ?? process.env.SITESHOT_API_KEY;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const progressIntervalMs = opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
 
   const server = new McpServer({
     name: "site-shot",
@@ -561,7 +584,8 @@ export function createServer(opts = {}) {
           ),
       }),
     },
-    (args, extra) => captureScreenshot(args, { apiKey, fetchImpl, signal: extra?.signal }),
+    (args, extra) =>
+      withProgress(extra, progressIntervalMs, () => captureScreenshot(args, { apiKey, fetchImpl, signal: extra?.signal })),
   );
 
   server.registerTool(
@@ -577,7 +601,10 @@ export function createServer(opts = {}) {
         "18,000 tokens; the note names any rows left out at the bottom.",
       inputSchema: toolInputSchema(baseInputShape, { ...API_PARAM_HINTS, ...FULL_PAGE_TOOL_HINTS }),
     },
-    (args, extra) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal }),
+    (args, extra) =>
+      withProgress(extra, progressIntervalMs, () =>
+        captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal }),
+      ),
   );
 
   return server;
