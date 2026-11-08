@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gemini-extension.json` at the repository root: `gemini extensions install
+  https://github.com/site-shot/site-shot-mcp` installs the pinned server and asks for the key as a
+  sensitive setting. Repository-only; the npm package is unchanged. Checked with gemini-cli 0.67.0.
+
 ## 1.2.2 — 2026-11-08
 
 ### Fixed

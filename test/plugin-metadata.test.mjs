@@ -160,6 +160,27 @@ test("the MCP command stays pinned to the released npm package", () => {
   assertPinnedRelease(mcp, "claude");
 });
 
+// Gemini CLI's gallery (geminicli.com/extensions) indexes any public repository that carries the
+// `gemini-cli-extension` topic and this manifest at its root, so this file IS the listing. Gemini CLI
+// passes an extension's MCP server only the variables its `settings` declare, so a key that is
+// mapped in `env` but not declared would reach the server empty (checked with gemini-cli 0.67.0:
+// declared, the setting's value arrives as SITESHOT_API_KEY).
+test("the Gemini CLI extension runs the released package and asks for the key", () => {
+  const gemini = readJson("gemini-extension.json");
+  assert.equal(gemini.name, "site-shot", "the brand name, which is also the install directory");
+  assert.equal(gemini.version, pkg.version, "version tracks the package it installs");
+  assert.match(gemini.description, /screenshot/i, "the gallery shows this text; it carries the task word");
+
+  const server = assertPinnedRelease(gemini, "gemini");
+  assert.deepEqual(server.env, { SITESHOT_API_KEY: "${SITESHOT_API_KEY}" }, "the key comes from the setting, never a literal");
+
+  assert.equal(gemini.settings?.length, 1, "one setting: the key");
+  const [setting] = gemini.settings;
+  assert.equal(setting.envVar, "SITESHOT_API_KEY", "declared, so Gemini CLI lets it through to the server");
+  assert.equal(setting.sensitive, true, "kept out of the plain-text .env");
+  assert.match(setting.description, /https:\/\/www\.site-shot\.com\/start\//, "says where the key comes from");
+});
+
 test("the Codex marketplace installs the same plugin directory", () => {
   assert.equal(codexMarketplace.name, marketplace.name, "one brand name across both hosts");
   assert.equal(codexMarketplace.plugins.length, 1, "exactly one plugin is offered");
@@ -931,6 +952,7 @@ test("every version this package states agrees with package.json", async () => {
   assert.equal(identity?.name, "site-shot", "the handshake keeps the brand name");
 
   assert.equal(readJson("manifest.json").version, pkg.version, "MCPB manifest tracks the package");
+  assert.equal(readJson("gemini-extension.json").version, pkg.version, "Gemini CLI extension tracks the package");
 
   const registry = readJson("server.json");
   assert.equal(registry.version, pkg.version, "MCP Registry entry tracks the package");

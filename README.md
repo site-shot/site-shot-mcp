@@ -168,6 +168,18 @@ Check it with `codex mcp get site-shot`. If you already have an entry like this 
 plugin, remove the manual one deliberately with `codex mcp remove site-shot` — nothing here edits
 your configuration for you.
 
+## Gemini CLI (extension)
+
+```bash
+gemini extensions install https://github.com/site-shot/site-shot-mcp
+```
+
+Gemini CLI asks for your Site-Shot API key during the install (get one at
+<https://www.site-shot.com/start/>) and stores it as a sensitive setting; change it later with
+`gemini extensions config site-shot`. The extension runs `npx -y site-shot-mcp@1.2.2`, and
+`gemini extensions update site-shot` moves it to the next release. `gemini mcp list` shows the server
+as `Connected` once it starts.
+
 ## Claude Desktop & other MCP clients
 
 1. Get a Site-Shot API key at <https://www.site-shot.com/start/>.
