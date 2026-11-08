@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { CLIENT_MAX_SIDE, TILE_MAX_HEIGHT, imageSize, tilePng } from "./image-tiles.js";
+import { CLIENT_MAX_SIDE, TILE_MAX_HEIGHT, TILE_PIXEL_BUDGET, imageSize, tilePng } from "./image-tiles.js";
 
 // Read from package.json rather than repeating the number here. A literal in this file
 // is a second place a release has to remember to touch, and it was already missed once:
@@ -31,6 +31,10 @@ function looksLikeImage(buf, contentType) {
   return buf.length >= 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP";
 }
 
+// Past this width one full-height tile alone is over the tile budget, and the server still returns
+// that one tile (6,750 px at a 2000 px tile and 13.5M px), so the budget is stated with this bound.
+const WIDEST_IN_BUDGET = Math.floor(TILE_PIXEL_BUDGET / TILE_MAX_HEIGHT);
+
 /**
  * The MCP content for one captured image. A tall PNG goes back as tiles a client can read at full
  * resolution; any other image the client may have to downscale goes back whole, with a note
@@ -48,21 +52,31 @@ function imageContent(buf, mimeType) {
   const tiles = mimeType === "image/png" && size.height > TILE_MAX_HEIGHT ? tilePng(buf) : null;
   if (tiles) {
     const end = tiles[tiles.length - 1].y + tiles[tiles.length - 1].height;
+    // The reason given is the server's own stop, not the client's limit: a page just past the budget
+    // would still fit under 25,000 tokens with one more tile.
     const left =
       end < size.height
-        ? ` Rows ${end}-${size.height - 1} at the bottom are not included: at full resolution they ` +
-          `would take this result past about 25,000 tokens, more than Claude Code accepts from one ` +
-          `tool call. Each further capture counts toward the month: format "jpeg" returns the whole ` +
-          `page as one image the client scales down (layout visible, small text not), a smaller width ` +
-          `fits more of the page into the tiles, and max_height captures only the top.`
+        ? ` Rows ${end}-${size.height - 1} at the bottom are not included: this server adds only whole ` +
+          `${TILE_MAX_HEIGHT} px tiles and keeps them within about 18,000 tokens` +
+          (size.width > WIDEST_IN_BUDGET
+            ? `, and at more than ${WIDEST_IN_BUDGET.toLocaleString("en-US")} px wide it returns one tile, `
+            : " ") +
+          `to stay under the 25,000 tokens Claude Code accepts from one tool call. Each further capture ` +
+          `counts toward the month: format "jpeg" returns the whole page as one image the client scales ` +
+          `down (layout visible, small text not), a smaller width fits more of the page into the tiles, ` +
+          `and max_height captures only the top.`
         : "";
+    const shape =
+      tiles.length === 1
+        ? `as 1 tile, at most ${TILE_MAX_HEIGHT} px tall.`
+        : `as ${tiles.length} tiles, top to bottom, each at most ${TILE_MAX_HEIGHT} px tall; ` +
+          `neighbouring tiles overlap by a few rows.`;
     const content = [
       {
         type: "text",
         text:
           `This capture is ${dims}, taller than AI clients show at full resolution, so it comes back ` +
-          `as ${tiles.length} tiles, top to bottom, each at most ${TILE_MAX_HEIGHT} px tall; ` +
-          `neighbouring tiles overlap by a few rows. It is still one capture.${wide}${left}`,
+          `${shape} It is still one capture.${wide}${left}`,
       },
     ];
     tiles.forEach((t, i) => {
@@ -311,6 +325,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeo
 
   let res;
   let body = null;
+  let readError = null;
   try {
     res = await guard(fetchImpl(endpoint, { signal: controller.signal }));
     try {
@@ -321,6 +336,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeo
       );
     } catch (err) {
       if (stopped) throw err;
+      readError = err;
     }
   } catch (err) {
     let reason;
@@ -336,6 +352,25 @@ export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeo
     signal?.removeEventListener?.("abort", onCancel);
   }
 
+  // A body that broke off mid-download (a connection reset) leaves nothing to show, and its error is
+  // the only reason there is: without it a 200 image response read as a bare "HTTP 200." failure.
+  // Only for a 2xx: a 401, 429 or 404 that broke off still goes to its own branch below, which knows
+  // what to do next (and that a refused key or a busy slot is not counted).
+  if (readError && res.ok) {
+    const reason = String(readError).split(apiKey).join("***");
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text:
+            `Site-Shot request failed: the response (HTTP ${res.status}) was cut off while downloading ` +
+            `(${reason}). Trying again is another capture that counts toward the month.`,
+        },
+      ],
+    };
+  }
+
   const contentType = (res.headers?.get?.("content-type") || "").toLowerCase();
 
   // Success path: the API returns the image bytes directly.
@@ -347,8 +382,10 @@ export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeo
   // Error path. The status is the one thing every failure carries, so it leads every message, and
   // each common one says what to do next. Text the API sent goes through word for word; an image
   // body is never decoded into text (a 48 KB error card once reached the agent as ~47,000
-  // characters of PNG) but is attached as an image, because the card is the only carrier of the
-  // reason: a DNS failure and a country with no proxy are both a 404 card in image mode.
+  // characters of PNG) but is attached as an image, because the card is all Site-Shot says about
+  // the failure: a DNS failure and a country with no proxy are both a 404 card in image mode. The
+  // card is what the API reported, not a diagnosis: a host that does not resolve can come back as a
+  // card reading "504 Gateway Timeout", so the text never tells the agent the card has the reason.
   let apiText = "";
   let card = null;
   try {
@@ -400,7 +437,10 @@ export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeo
       text +=
         ` A 404 here means Site-Shot could not render the page (it is not the page's own status): the ` +
         `host may not resolve, or the page timed out or blocked the render.` +
-        (card ? ` The attached error card names the reason.` : "") +
+        (card
+          ? ` The attached error card shows what Site-Shot reported; for a host that does not resolve ` +
+            `it can read "504 Gateway Timeout", so check the URL's spelling before retrying.`
+          : "") +
         ` A retry is another capture that counts toward the month.`;
     } else if (status >= 500 && noReason) {
       text += ` That is a server-side error at Site-Shot; trying again in a minute usually works.`;
@@ -598,7 +638,8 @@ export function createServer(opts = {}) {
         "A PNG taller than 2000 px comes back as several image tiles, top to bottom, so text stays " +
         "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down. " +
         "Tiles are full-resolution images, about 2,700 tokens per 1024 x 2000 tile, and stop at about " +
-        "18,000 tokens; the note names any rows left out at the bottom.",
+        "18,000 tokens (a page wider than 6,750 px gets one tile, which can be more); the note names " +
+        "any rows left out at the bottom.",
       inputSchema: toolInputSchema(baseInputShape, { ...API_PARAM_HINTS, ...FULL_PAGE_TOOL_HINTS }),
     },
     (args, extra) =>

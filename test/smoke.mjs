@@ -352,6 +352,13 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   const text = res.content[0].text;
   assert.match(text, /HTTP 404 \(the API answered with an error image/);
   assert.doesNotMatch(text, /country|undefined/i);
+  // The card is what Site-Shot reported, not a diagnosis: a host that does not resolve comes back
+  // as a card reading "504 Gateway Timeout", and an agent told the card names the reason reports a
+  // timeout for a mistyped domain and retries, spending another capture.
+  assert.doesNotMatch(text, /names the reason/, "the card is not promised to name the reason");
+  assert.match(text, /shows what Site-Shot reported/);
+  assert.match(text, /"504 Gateway Timeout"/, "the misleading card text a DNS failure carries is named");
+  assert.match(text, /check the URL's spelling before retrying/);
   passed++;
 }
 
@@ -658,7 +665,10 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   const end = Number(/rows \d+-(\d+)/.exec(labels[labels.length - 1])[1]) + 1;
   assert.ok(end < H, "this page is too tall for the budget at 1600 px");
   assert.ok(res.content[0].text.includes(`Rows ${end}-${H - 1} at the bottom are not included`), "names the rows left out");
-  assert.match(res.content[0].text, /25,000 tokens/);
+  // The stop is this server's own budget. At 1600 x 8000 a fifth tile would make about 21,300
+  // tokens, still under 25,000, so "would take this result past 25,000 tokens" was false here.
+  assert.match(res.content[0].text, /this server adds only whole 2000 px tiles and keeps them within about 18,000 tokens to stay under the 25,000 tokens/);
+  assert.doesNotMatch(res.content[0].text, /would take this result past/);
   assert.match(res.content[0].text, /counts toward the month/);
 
   // An interlaced PNG goes back whole; the advice is not "use png".
@@ -704,4 +714,72 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/32 smoke checks passed`);
+// 33) A body that breaks off mid-download (a connection reset, not the deadline or a cancel) is
+// reported with its own error. It was swallowed, so a 200 image response reached the agent as
+// "Site-Shot could not capture the screenshot: HTTP 200." with no reason at all.
+{
+  const cutOff = (message) => async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (h) => (h.toLowerCase() === "content-type" ? "image/png" : null) },
+    arrayBuffer: async () => {
+      throw new TypeError(message);
+    },
+  });
+  const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl: cutOff("terminated") });
+  assert.equal(res.isError, true);
+  const text = res.content[0].text;
+  assert.ok(text.startsWith("Site-Shot request failed: the response (HTTP 200) was cut off while downloading"), text);
+  assert.match(text, /TypeError: terminated/, "the read error reaches the agent");
+  assert.match(text, /another capture that counts toward the month/, "a retry is not free");
+  assert.doesNotMatch(text, /could not capture the screenshot: HTTP 200\./);
+  assert.equal(res.content.length, 1);
+  // The read error can quote the request URL, which holds the key.
+  const keyed = await captureScreenshot(
+    { url: "https://example.com" },
+    { apiKey: "SECRET-KEY-123", fetchImpl: cutOff("terminated reading https://api.site-shot.com/?userkey=SECRET-KEY-123") },
+  );
+  assert.doesNotMatch(keyed.content[0].text, /SECRET-KEY-123/, "the key never reaches the tool result");
+  assert.match(keyed.content[0].text, /userkey=\*\*\*/);
+  // A refusal that broke off keeps its own guidance: a 401 is the key, and it is not counted.
+  const refused = await captureScreenshot(
+    { url: "https://example.com" },
+    {
+      apiKey: "K",
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        headers: { get: () => null },
+        arrayBuffer: async () => {
+          throw new TypeError("terminated");
+        },
+      }),
+    },
+  );
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /did not accept the API key \(HTTP 401\)/);
+  assert.doesNotMatch(refused.content[0].text, /cut off while downloading|counts toward the month/);
+  passed++;
+}
+
+// 34) A page wider than one tile's share of the budget still gets one tile, and the note says so
+// in the singular and names the width bound: it read "comes back as 1 tiles" and blamed a 25,000
+// token limit, while the tool description promised a stop at about 18,000 tokens.
+{
+  const W = 6800;
+  const H = 2100;
+  const page = encodePng(W, H, (x, y) => [y & 0xff, x & 0xff, 7, 255]);
+  const res = await captureScreenshot(
+    { url: "https://example.com", full_page: true },
+    { apiKey: "K", fetchImpl: async () => fakeImageResponse(new Uint8Array(page)) },
+  );
+  assert.equal(res.content.filter((c) => c.type === "image").length, 1, "one tile at this width");
+  const note = res.content[0].text;
+  assert.match(note, /comes back as 1 tile, at most 2000 px tall\./);
+  assert.doesNotMatch(note, /\b1 tiles\b|neighbouring tiles/);
+  assert.match(note, /at more than 6,750 px wide it returns one tile/);
+  assert.match(note, /Rows 2000-2099 at the bottom are not included/);
+  passed++;
+}
+
+console.log(`ok — ${passed}/34 smoke checks passed`);

@@ -196,8 +196,9 @@ Every integration above runs the same local stdio server, published on npm and i
 
 ## Tools
 
-Two tools, both returning the screenshot as an MCP image. There is no saved library, no listing,
-no markdown conversion and no scheduling — this server captures images and hands them back.
+Two tools, both returning the screenshot as MCP image content, sometimes with text items around
+it (see below). There is no saved library, no listing, no markdown conversion and no scheduling —
+this server captures images and hands them back.
 
 ### `capture_screenshot`
 Screenshot a web page (viewport by default).
@@ -216,7 +217,10 @@ Screenshot a web page (viewport by default).
 | `wait_ms` | number | API default | Extra wait before capture (SPAs/animations) |
 | `max_height` | number | 20000 (full page) | Cap captured height |
 
-Returns the screenshot as an MCP image.
+Returns the screenshot as an MCP image. A capture over 2000 px on a side comes back with a text
+note first: a PNG taller than 2000 px is the note followed by a text label and an image for each
+tile, top to bottom; any other image that large is the note followed by the whole image. Code that
+reads `content[0]` as the image should take the items with `type: "image"`, in order, instead.
 
 > **"API default" is not a number this package gets to state.** `width`, `height` and `wait_ms`
 > are forwarded only when you pass them, so whatever applies when you don't is decided by the
@@ -233,9 +237,12 @@ An argument the tools do not take is refused before any capture, with the name t
 Site-Shot API's own names such as `delay_time`, `full_size` or `no_ads` map to `wait_ms`,
 `full_page` and `block_ads` here.
 
-Every failure from the API names its HTTP status and says what to do next (for example, a 401
-points to where the key is set). When the API answers with an error card instead of a screenshot,
-the card is attached as an image, because it names the reason.
+Every failure the API answers names its HTTP status. A 401 or a 429 also says what to do next (a
+401 points to where the key is set), and so does a 403, 404 or 5xx when the API sent no text of its
+own. When the API answers with an error card instead of a screenshot, the card is attached as an
+image. It shows what Site-Shot reported, which is not always the cause: for a host that does not
+resolve it can read "504 Gateway Timeout", so check the URL's spelling before retrying. Every retry
+is another capture that counts toward the month.
 
 ### `capture_full_page`
 Same as `capture_screenshot` with full-page capture enabled.
@@ -246,8 +253,9 @@ them (Claude refuses anything over 8000 px on a side), so one 10,000 px image wo
 text unreadable. The tiles are cut from the one capture, so they need no extra capture. Each tile
 is a full-resolution image the model reads, so a tall page uses far more context than one scaled-down
 image: about 2,700 tokens for a 1024 x 2000 tile. Tiles stop at about 18,000 tokens in all (six tiles,
-the top 11,760 rows, at 1024 px wide), under the 25,000 Claude Code takes from one tool call; the
-note names any rows left out at the bottom. A tall `jpeg` or `webp` comes back whole, with a note.
+the top 11,760 rows, at 1024 px wide), under the 25,000 Claude Code takes from one tool call; a page
+wider than 6,750 px gets one tile, which can be more. The note names any rows left out at the
+bottom. A tall `jpeg` or `webp` comes back whole, with a note.
 
 ## Why call this server instead of the agent's own browser?
 

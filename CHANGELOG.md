@@ -14,37 +14,44 @@
   pasted into a template, so it is caught without being echoed into the transcript or the logs.
 - A full-page capture is readable again. It came back as one image as tall as the page (1024 x
   10381 px for the Site-Shot homepage, up to 20,000 px by default); Claude refuses images over
-  8000 px on a side and scales a long edge over about 2000 px down, so Claude Code showed that page
-  at 197 x 2000 and the model could not read its text. A PNG taller than 2000 px now comes back
-  as tiles, top to bottom, each at most 2000 px tall and overlapping by a few rows, cut from the
-  one capture the API returned (no extra capture, no new dependency). A tall jpeg or webp, which
-  the server cannot cut, comes back whole with a note that clients may scale it down. Tiles are
-  full-resolution images (about 2,700 tokens per 1024 x 2000 tile), so they stop at about 18,000
-  tokens, under the 25,000 Claude Code takes from one tool call: at 1024 px wide that is the top
-  11,760 rows, and the note names the rows left out and how to see them (each way is another
-  capture). Ten 1280 px tiles drew a false "[OUTPUT TRUNCATED - exceeded 25000 token limit]" in
-  Claude Code 2.1.283. Tile labels give inclusive row ranges (0-1999).
+  8000 px on a side and scales a long edge over about 2000 px down, so Claude Code showed that
+  page at 197 x 2000 and the model could not read its text. A PNG taller than 2000 px now comes
+  back as tiles, top to bottom, each at most 2000 px tall and overlapping by a few rows, cut from
+  the one capture the API returned (no extra capture, no new dependency). A tall jpeg or webp,
+  which the server cannot cut, comes back whole with a note that clients may scale it down. Tiles
+  are full-resolution images (about 2,700 tokens per 1024 x 2000 tile), so they stop at about
+  18,000 tokens, under the 25,000 Claude Code takes from one tool call: at 1024 px wide that is
+  the top 11,760 rows, and the note names the rows left out, says the stop is this server's, and
+  says how to see them (each way is another capture). A page wider than 6,750 px gets one tile,
+  which can be more than 18,000 tokens; the note says "1 tile" and names that bound. Ten 1280 px
+  tiles drew a false "[OUTPUT TRUNCATED - exceeded 25000 token limit]" in Claude Code 2.1.283.
+  Tile labels give inclusive row ranges (0-1999).
 - A failed capture no longer reaches the agent as image bytes. In image mode the API can answer a
   failure with an error-card PNG and no Content-Type — a `strict_country` request whose country
   has no proxy right now is HTTP 404 with a 48 KB card (measured 2026-11-05). The error path read
   that body as text, so the agent got about 47,000 characters of decoded PNG and no country hint;
   `strict_country` is on by default whenever `country` is set. Image bodies are now never decoded
-  into text: the card goes back as an image next to the error text, because it is the only thing
-  that names the reason (`proxy_navigation_failed` for a host that does not resolve,
-  `country_unavailable` for a country with no proxy).
-- Every failure states its HTTP status and what to do next. A 401 says the key was not accepted,
-  where to set it (`SITESHOT_API_KEY`; in Claude Code `/plugin configure site-shot@site-shot`) and
-  where the key is (https://www.site-shot.com/start/); 1.2.1 said only "Invalid authentication
-  credentials". A 403 keeps the API's text word for word and, when there is none, says it is a plan
-  problem. A 429 says the key runs too many captures at once and that the refusal does not count.
-  A 404 says it is Site-Shot's capture-failed status, not the page's, and that a retry counts
-  toward the month; an HTML error page from a proxy is no longer passed through.
+  into text: the card goes back as an image next to the error text, because it is all Site-Shot
+  says about the failure. The text does not tell the agent that the card has the reason: the card
+  shows what Site-Shot reported, and for a host that does not resolve it can read "504 Gateway
+  Timeout". The 404 text says so, asks the agent to check the URL's spelling before retrying, and
+  says a retry is another capture that counts toward the month.
+- Every failure the API answers states its HTTP status, and the common ones say what to do next: a
+  401 and a 429 always, a 403, 404 or 5xx when the API sent no text of its own. A 401 says the key
+  was not accepted, where to set it (`SITESHOT_API_KEY`; in Claude Code
+  `/plugin configure site-shot@site-shot`) and where the key is (https://www.site-shot.com/start/); 1.2.1 said only
+  "Invalid authentication credentials". A 403 keeps the API's text word for word and, when there
+  is none, says it is a plan problem. A 429 says the key runs too many captures at once and that
+  the refusal does not count. A 404 says it is Site-Shot's capture-failed status, not the page's,
+  and that a retry counts toward the month; an HTML error page from a proxy is no longer passed
+  through.
 - A free-plan country refusal is explained. In image mode it carries no text (a 403 card, or an
-  empty 404), so 1.2.1 showed only the status, and its changelog's "reach the agent word for word"
-  held only for JSON mode. With a country other than US, a 403 or 404 without text now says that
-  the free plan allows only the default location or the US and that `strict_country: false` does
-  not lift it. The `strict_country: false` advice for a 404 card is offered only for the case where
-  the card says `country_unavailable`: a host that does not resolve is a 404 card too.
+  empty 404), so 1.2.1 showed only the status (empty 404) or the card decoded as text (403 card),
+  and its changelog's "reach the agent word for word" held only for JSON mode. With a country
+  other than US, a 403 or 404 without text now says that the free plan allows only the default
+  location or the US and that `strict_country: false` does not lift it. The
+  `strict_country: false` advice for a 404 card is offered only for the case where the card says
+  `country_unavailable`: a host that does not resolve is a 404 card too.
 
 - The 90-second deadline now covers the whole exchange. It was cleared as soon as the response
   headers arrived, so a body that stalled afterwards (error cards come chunked) was read with no
@@ -62,8 +69,28 @@
   call with the Site-Shot API's own names ran, and counted, as a capture without the wait or the
   full page that was asked for. The served schemas keep `additionalProperties: false`, so clients
   and models still read that extra keys are not taken, and each tool lists its own arguments.
+  This needs `@modelcontextprotocol/sdk` 1.22.0 or later, and the dependency range now starts
+  there (it was `^1.12.0`): 1.12 to 1.21 wrap the tool schema in `z.object()` as if it were a list
+  of fields, so `tools/list` fails ("Cannot read properties of null (reading '_def')") and every
+  call fails ("keyValidator._parse is not a function"), measured with 1.21.0. A fresh install
+  already resolved a newer SDK; this matters to a project that pins an older one and imports this
+  package.
+
+- A response that breaks off while it downloads (a connection reset) is reported as that, with the
+  read error: "Site-Shot request failed: the response (HTTP 200) was cut off while downloading
+  (TypeError: terminated)", and a note that trying again is another capture. The read error was
+  dropped, so a 200 image response cut off mid-body reached the agent as "Site-Shot could not
+  capture the screenshot: HTTP 200." with no reason. The key is masked if the error quotes the
+  request URL.
 
 ### Changed
+
+- A tool result can hold several content items, and the first may be text. A capture over 2000 px
+  on a side comes back with a text note first: a tiled PNG as the note followed by a text label
+  and an image for each tile, top to bottom; any other image that large as the note followed by
+  the whole image. Up to 1.2.1 every successful result was one image item. Code that reads
+  `content[0]` as the image (a LangChain or CrewAI tool wrapper, for one) should take the items
+  with `type: "image"`, in order. A capture within 2000 px on both sides is still one image item.
 
 - The tool description, the README and the MCPB listing no longer promise "fewer vision tokens"
   from ad and banner removal. Vision models are billed by image size, and the website already
@@ -113,7 +140,14 @@
   and placeholder keys; check 28 a body that stalls after the headers, check 29 a cancelled call
   over a real MCP session, check 30 arguments the tools do not take (and that the served schemas
   still say `additionalProperties: false`), check 31 the tile budget and its note, check 32
-  progress notifications that outlast a 200 ms client timeout.
+  progress notifications that outlast a 200 ms client timeout, check 33 a body that breaks off
+  mid-download, and check 34 a page too wide for more than one tile. Check 21 also asserts the
+  404 card text: no "names the reason", the "504 Gateway Timeout" a host that does not resolve
+  can carry, and the advice to check the URL first.
+- `npm run test:plugin` checks that the declared `@modelcontextprotocol/sdk` range starts at
+  1.22.0 or later and that `package-lock.json` records the same range, and that the skill's
+  error-card line names the "504 Gateway Timeout" case instead of saying the card names the
+  reason.
 
 ## 1.2.1 — 2026-10-31
 

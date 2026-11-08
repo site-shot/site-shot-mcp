@@ -626,7 +626,11 @@ test("the skill says what the image really shows, where it goes, and what a fail
   assert.match(fails, /HTTP 403[\s\S]*https:\/\/www\.site-shot\.com\/start\/[\s\S]*https:\/\/www\.site-shot\.com\/pricing\//);
   assert.match(fails, /HTTP 429/);
   assert.match(fails, /placeholder/);
-  assert.match(fails, /error card[\s\S]*reason/);
+  // The card is what Site-Shot reported, not a diagnosis: a host that does not resolve comes back
+  // as a card reading "504 Gateway Timeout", so an agent that trusts it reports a timeout for a
+  // mistyped domain and retries, and every retry is another capture.
+  assert.doesNotMatch(fails, /card names the\s+reason/, "the card is not promised to name the reason");
+  assert.match(fails, /error card[\s\S]*"504 Gateway Timeout"[\s\S]*URL's spelling[\s\S]*another capture/);
 
   // One skill ships to hosts with and without the Claude Code plugin, so its setup names both.
   assert.match(skill, /Tessl/, "a Tessl install is covered");
@@ -933,4 +937,44 @@ test("every version this package states agrees with package.json", async () => {
   for (const entry of registry.packages ?? []) {
     assert.equal(entry.version, pkg.version, `registry package "${entry.identifier}" tracks the package`);
   }
+});
+
+// Both tools hand the SDK a strict z.object(...) as inputSchema. SDK 1.12-1.21 wrap whatever they
+// get in z.object() as if it were a raw shape, so on those versions tools/list fails ("Cannot read
+// properties of null (reading '_def')") and every call fails with "keyValidator._parse is not a
+// function" (measured with 1.21.0). 1.22.0 is the first that takes a schema object as it is. The
+// lockfile pins a newer SDK, so the smoke suite cannot see an old one; a host project that already
+// pins one can dedupe to it, because src/server.js is the package's main. The declared floor is the
+// only guard.
+test("the declared MCP SDK range excludes versions that cannot take a schema object", () => {
+  const range = pkg.dependencies?.["@modelcontextprotocol/sdk"];
+  const floor = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range ?? "");
+  assert.ok(floor, `a caret range with a full version (got ${range})`);
+  const [major, minor] = [Number(floor[1]), Number(floor[2])];
+  assert.equal(major, 1, "the SDK range stays on 1.x");
+  assert.ok(minor >= 22, `the SDK floor is at least 1.22.0 (got ${range})`);
+  const lock = readJson("package-lock.json");
+  assert.equal(lock.packages?.[""]?.dependencies?.["@modelcontextprotocol/sdk"], range, "package-lock.json records the same range");
+  const locked = lock.packages?.["node_modules/@modelcontextprotocol/sdk"]?.version ?? "";
+  assert.ok(Number(locked.split(".")[1]) >= minor, `the locked SDK (${locked}) satisfies the floor`);
+});
+
+// The README is what a LangChain or CrewAI integrator reads before writing code against a result,
+// and what a person reads before trusting an error. Each line below was once stale: "both returning
+// the screenshot as an MCP image" while a tall PNG comes back as a text note and several tiles,
+// "every failure ... says what to do next" while a 400 or a 404 with API text adds no next step, and
+// "the card names the reason" while a host that does not resolve yields a card reading
+// "504 Gateway Timeout".
+test("README states the result shape, which failures say what to do, and what a card is", () => {
+  // Line breaks fall anywhere in prose, so the checks read it with whitespace collapsed.
+  const tools = section("## Tools").replace(/\s+/g, " ");
+  const all = readme.replace(/\s+/g, " ");
+  assert.doesNotMatch(tools, /both returning the screenshot as an MCP image\./, "not one image item for every capture");
+  assert.match(tools, /text note first/, "says a large capture starts with a text note");
+  assert.match(tools, /`content\[0\]`[^.]*`type: "image"`/, "tells integrators how to find the images");
+  assert.doesNotMatch(all, /Every failure[^.]*says what to do next/, "not every failure adds a next step");
+  assert.match(tools, /A 401 or a 429 also says what to do next[^.]*\([^)]*\), and so does a 403, 404 or 5xx when the API sent no text/);
+  assert.doesNotMatch(all, /\bnames the reason\b/, "the card is not promised to name the reason");
+  assert.match(tools, /"504 Gateway Timeout"[^.]*check the URL's spelling before retrying/);
+  assert.match(tools, /wider than 6,750 px gets one tile/, "the token cap names its width bound");
 });

@@ -92,8 +92,10 @@ A failure from the API names its HTTP status. Report it, with the next step for 
   does not cover. The key and plan are at https://www.site-shot.com/start/ (accounts confirmed before
   2026-10-30 switch the free plan on there), and plans at https://www.site-shot.com/pricing/.
 - HTTP 429: a capture is already running on this key. Wait for it to finish.
-- HTTP 404 with an error card attached: Site-Shot could not render the page. The card names the
-  reason; read it before saying anything about the page itself.
+- HTTP 404 with an error card attached: Site-Shot could not render the page. The card shows what
+  Site-Shot reported, which is not always the cause: for a host that does not resolve it can read
+  "504 Gateway Timeout". Check the URL's spelling before retrying or saying anything about the page
+  itself; every retry is another capture that counts toward the month.
 - HTTP 404 with no card, or a 403 with no text, after a `country` other than US: on a free-plan key
   that is the free plan refusing the country (paid plans at https://www.site-shot.com/pricing/);
   otherwise Site-Shot could not render the page. The error text says which cases are possible.
