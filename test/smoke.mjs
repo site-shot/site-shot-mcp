@@ -294,27 +294,26 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-// 19) The free plan's refusals reach the agent word for word. A spent month is a 403 from Kong in
-// every mode, and its message may start with either "Free API trial used up" (what the API sends
-// today) or "Free plan used up" (what it will send after the next server deploy); a client has to
-// accept both. A country refused on the free plan is a 403 here because this server asks for the
-// image, not response_type=json; its text after "Geotargeting needs a paid plan" will change. The
-// renewal date and the pricing link are what the agent passes on, so nothing here may match on one
-// prefix and rewrite or drop the other.
+// 19) A spent month reaches the agent word for word, with the status. It is a 403 from Kong in
+// every mode, and its message may start with either "Free API trial used up" (what the API sent
+// at launch) or "Free plan used up" (after the next server deploy); a client has to accept both.
+// The renewal date and the pricing link are what the agent passes on, so nothing here may match on
+// one prefix and rewrite or drop the other. (A free-plan country refusal is not text in image
+// mode, which this server always uses; check 26 replays the shapes it really has.)
 {
   const bodies = [
     "Free plan used up: 100 captures this month. It renews on 2026-12-01 (UTC). " +
       "For more, choose a paid plan: https://www.site-shot.com/pricing/",
     "Free API trial used up: 100 captures this month. It renews on 2026-12-01 (UTC). " +
       "For more, choose a paid plan: https://www.site-shot.com/pricing/",
-    "Geotargeting needs a paid plan: https://www.site-shot.com/pricing/",
   ];
   for (const message of bodies) {
-    for (const [body, type] of [[JSON.stringify({ error: message }), "application/json"], [message, "text/plain"]]) {
+    for (const [body, type] of [[JSON.stringify({ message }), "application/json"], [message, "text/plain"]]) {
       const fetchImpl = async () => fakeErrorResponse(403, body, type);
       const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl });
       assert.equal(res.isError, true, `403 is an error (${type})`);
       assert.ok(res.content[0].text.includes(message), `403 body surfaced verbatim (${type}): ${message}`);
+      assert.match(res.content[0].text, /HTTP 403/, "the status is kept next to the text");
     }
   }
   passed++;
@@ -329,11 +328,16 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   const res = await captureScreenshot({ url: "https://example.com", country: "AQ" }, { apiKey: "K", fetchImpl });
   const text = res.content[0].text;
   assert.equal(res.isError, true);
-  assert.ok(text.length < 600, `short, readable error (got ${text.length} chars)`);
+  // The bound is what matters, not its exact value: 1.2.1 sent 48,983 characters here.
+  assert.ok(text.length < 1000, `short, readable error (got ${text.length} chars)`);
   assert.doesNotMatch(text, /PNG|IHDR|\u0000/, "no image bytes in agent-visible text");
   assert.match(text, /HTTP 404/);
   assert.match(text, /"AQ"/, "names the country");
   assert.match(text, /strict_country: false/, "offers the opt-out");
+  // A DNS failure is a 404 card too, so a proxy shortage is offered as what the card may say.
+  assert.match(text, /If the card says country_unavailable/, "the proxy hint is conditional on the card");
+  assert.equal(res.content[1]?.type, "image", "the card itself is attached, so the agent can read its reason");
+  assert.equal(Buffer.from(res.content[1].data, "base64").length, card.length);
   passed++;
 }
 
@@ -349,11 +353,17 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-// 22) An empty 404 body (an unresolvable host, measured) keeps the bare status.
+// 22) An empty 404 body keeps the status and says what a Site-Shot 404 means. An agent reads a
+// bare "HTTP 404" as "page not found"; here it means the render failed.
 {
   const fetchImpl = async () => fakeCardResponse(404, new Uint8Array(0));
   const res = await captureScreenshot({ url: "https://no-such-host.invalid" }, { apiKey: "K", fetchImpl });
-  assert.equal(res.content[0].text, "Site-Shot could not capture the screenshot: HTTP 404");
+  const text = res.content[0].text;
+  assert.ok(text.startsWith("Site-Shot could not capture the screenshot: HTTP 404."), text);
+  assert.match(text, /could not render the page \(it is not the page's own status\)/);
+  assert.match(text, /counts toward the month/, "a retry is not free");
+  assert.doesNotMatch(text, /card|country|undefined/i, "no card, no country: nothing about either");
+  assert.equal(res.content.length, 1, "nothing to attach");
   passed++;
 }
 
@@ -452,4 +462,53 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/25 smoke checks passed`);
+// 26) A free-plan country refusal in image mode, in the two shapes it has: the API's 403 with an
+// error card and no Content-Type (Request.pm send_file), and the empty 404 measured on 2026-10-30.
+// Neither carries text, so the server has to name the plan or the agent never learns it.
+{
+  const card = new Uint8Array(2048);
+  card.set(PNG, 0);
+  for (const [status, bytes] of [[403, card], [404, new Uint8Array(0)]]) {
+    const fetchImpl = async () => fakeCardResponse(status, bytes);
+    const res = await captureScreenshot({ url: "https://example.com", country: "DE" }, { apiKey: "K", fetchImpl });
+    const text = res.content[0].text;
+    assert.equal(res.isError, true);
+    assert.match(text, new RegExp(`HTTP ${status}`));
+    assert.match(text, /free plan allows only the default location or the US/, `${status}: names the free plan's bound`);
+    assert.match(text, /https:\/\/www\.site-shot\.com\/pricing\//);
+    assert.match(text, /strict_country: false does not lift that/, `${status}: the opt-out is not offered as a fix`);
+    assert.doesNotMatch(text, /pass strict_country: false/, `${status}: no retry advice that would be refused again`);
+  }
+  // US is inside the free plan, so it gets no free-plan explanation.
+  const res = await captureScreenshot(
+    { url: "https://example.com", country: "us" },
+    { apiKey: "K", fetchImpl: async () => fakeCardResponse(403, card) },
+  );
+  assert.doesNotMatch(res.content[0].text, /free plan allows/);
+  passed++;
+}
+
+// 27) 401 and 429 keep their status and say what to do; neither is mistaken for another error.
+{
+  const bad = await captureScreenshot(
+    { url: "https://example.com" },
+    { apiKey: "K", fetchImpl: async () => fakeErrorResponse(401, JSON.stringify({ message: "Invalid authentication credentials" })) },
+  );
+  const t401 = bad.content[0].text;
+  assert.match(t401, /HTTP 401/);
+  assert.match(t401, /Invalid authentication credentials/, "Kong's text is kept");
+  assert.match(t401, /SITESHOT_API_KEY/);
+  assert.match(t401, /\/plugin configure site-shot@site-shot/);
+  assert.match(t401, /https:\/\/www\.site-shot\.com\/start\//);
+
+  const busy = await captureScreenshot(
+    { url: "https://example.com" },
+    { apiKey: "K", fetchImpl: async () => fakeErrorResponse(429, JSON.stringify({ message: "API rate limit exceeded" })) },
+  );
+  assert.match(busy.content[0].text, /HTTP 429/);
+  assert.match(busy.content[0].text, /one at a time/);
+  assert.match(busy.content[0].text, /does not count toward the month/);
+  passed++;
+}
+
+console.log(`ok — ${passed}/27 smoke checks passed`);

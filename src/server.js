@@ -97,6 +97,12 @@ export function placeholderKeyMessage(apiKey) {
   );
 }
 
+function imageMime(buf) {
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+  if (buf.length >= 12 && buf.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  return "image/png";
+}
+
 export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   const placeholder = placeholderKeyMessage(apiKey);
   if (placeholder) return { isError: true, content: [{ type: "text", text: placeholder }] };
@@ -229,53 +235,105 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
     return { content: imageContent(buf, mimeType) };
   }
 
-  // Error path: surface whatever the API said (often a JSON or text error body) — unless the
-  // body is an image. An error card is not text: decoded, it reached the agent as ~47,000
-  // characters of PNG and buried the only signal, the status.
-  let detail = `HTTP ${res.status}`;
-  let errorImage = false;
+  // Error path. The status is the one thing every failure carries, so it leads every message, and
+  // each common one says what to do next. Text the API sent goes through word for word; an image
+  // body is never decoded into text (a 48 KB error card once reached the agent as ~47,000
+  // characters of PNG) but is attached as an image, because the card is the only carrier of the
+  // reason: a DNS failure and a country with no proxy are both a 404 card in image mode.
+  let apiText = "";
+  let card = null;
   try {
     const body =
       typeof res.arrayBuffer === "function"
         ? Buffer.from(await res.arrayBuffer())
         : Buffer.from(await res.text(), "utf8");
     if (looksLikeImage(body, contentType)) {
-      errorImage = true;
-      detail += " (the API answered with an error image, not a screenshot)";
+      card = body;
     } else {
-      const text = body.toString("utf8");
+      const text = body.toString("utf8").trim();
       try {
         const json = JSON.parse(text);
-        detail = json.error || json.message || text || detail;
+        apiText = String(json.error || json.message || text);
       } catch {
-        detail = text || detail;
+        apiText = text;
       }
+      // An HTML error page from a proxy in front of the API says nothing an agent can use.
+      if (/^<(?:!doctype|html)/i.test(apiText)) apiText = "";
+      if (apiText.length > 500) apiText = `${apiText.slice(0, 500)}...`;
     }
   } catch {
-    /* keep status-only detail */
+    /* status only */
   }
-  // Gated on countryCode, not on the body alone: without it an unrelated error carrying
-  // this marker would interpolate `undefined` into text an agent reads back to a user.
-  if (countryCode && /country_unavailable/i.test(detail)) {
-    detail +=
-      ` — no proxy is available for country "${countryCode}". Pick another country ` +
+  const status = res.status;
+  const said = apiText ? `: ${apiText}${/[.!?]$/.test(apiText) ? "" : "."}` : ".";
+  const noReason = !apiText;
+  let text;
+  if (status === 401) {
+    text =
+      `Site-Shot did not accept the API key (HTTP 401)${said} Check the SITESHOT_API_KEY this ` +
+      `server was given; in Claude Code with the site-shot plugin, enter it again with ` +
+      `/plugin configure site-shot@site-shot. Your key is at https://www.site-shot.com/start/.`;
+  } else if (status === 403) {
+    text = `Site-Shot refused the capture (HTTP 403)${said}`;
+    if (noReason) {
+      text +=
+        ` A 403 means a plan problem: no captures left this month, no active plan on this key, or a ` +
+        `request the plan does not cover. The key and its plan are at https://www.site-shot.com/start/; ` +
+        `plans at https://www.site-shot.com/pricing/.`;
+    }
+  } else if (status === 429) {
+    text =
+      `Site-Shot refused the capture (HTTP 429)${said} Too many captures at once on this key (the ` +
+      `free plan runs one at a time): wait for the running capture to finish, then try again. A ` +
+      `request refused with 429 does not count toward the month.`;
+  } else {
+    text = `Site-Shot could not capture the screenshot: HTTP ${status}`;
+    if (card) text += " (the API answered with an error image, not a screenshot)";
+    text += said;
+    if (status === 404 && noReason) {
+      text +=
+        ` A 404 here means Site-Shot could not render the page (it is not the page's own status): the ` +
+        `host may not resolve, or the page timed out or blocked the render.` +
+        (card ? ` The attached error card names the reason.` : "") +
+        ` A retry is another capture that counts toward the month.`;
+    } else if (status >= 500 && noReason) {
+      text += ` That is a server-side error at Site-Shot; trying again in a minute usually works.`;
+    }
+  }
+
+  // Gated on countryCode: without it an unrelated error carrying this marker would interpolate
+  // `undefined` into text an agent reads back to a user.
+  if (countryCode && /country_unavailable/i.test(apiText)) {
+    text +=
+      ` No proxy is available for country "${countryCode}". Pick another country ` +
       `(https://www.site-shot.com/countries)`;
     // Suggesting the opt-out to a caller who already passed it would just be noise.
-    detail += strictCountry
-      ? `, or pass strict_country: false to render through a US proxy instead.`
-      : `.`;
-  } else if (countryCode && strictCountry && errorImage && res.status === 404) {
-    // Image mode has no error field to match: this status-plus-card is the whole refusal.
-    detail +=
-      `. With strict_country on, this is what the API returns when no proxy is available for ` +
-      `country "${countryCode}" right now. Pick another country ` +
-      `(https://www.site-shot.com/countries), retry later, or pass strict_country: false to ` +
-      `render through a US proxy instead.`;
+    text += strictCountry ? `, or pass strict_country: false to render through a US proxy instead.` : `.`;
+  } else if (countryCode && noReason && (status === 403 || status === 404)) {
+    // In image mode a free-plan country refusal arrives with no text at all (a 403 card, or an
+    // empty 404), so the plan has to be named here or the agent never learns it.
+    if (countryCode !== "US") {
+      text +=
+        ` Country "${countryCode}": the free plan allows only the default location or the US, so a ` +
+        `free-plan key is refused here; other countries need a paid plan ` +
+        `(https://www.site-shot.com/pricing/), and strict_country: false does not lift that.`;
+    }
+    // One possible cause, not the cause: a DNS failure is a 404 card too, so this is conditional
+    // on what the card says, which the agent can read and this server cannot.
+    if (strictCountry && card && status === 404) {
+      text +=
+        ` If the card says country_unavailable, no proxy is available for "${countryCode}" right ` +
+        `now: pick another country, retry later, or pass strict_country: false to render through a ` +
+        `US proxy.`;
+    }
   }
-  return {
-    isError: true,
-    content: [{ type: "text", text: `Site-Shot could not capture the screenshot: ${detail}` }],
-  };
+
+  const content = [{ type: "text", text }];
+  // Bounded so a misbehaving upstream cannot push megabytes into the agent's context as an "error".
+  if (card && card.length <= 1024 * 1024) {
+    content.push({ type: "image", data: card.toString("base64"), mimeType: imageMime(card) });
+  }
+  return { isError: true, content };
 }
 
 // Shared input schema (zod raw shape) for both tools.

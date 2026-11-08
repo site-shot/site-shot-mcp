@@ -17,20 +17,34 @@
   as tiles, top to bottom, each at most 2000 px tall and overlapping by a few rows, cut from the
   one capture the API returned (no extra capture, no new dependency). A tall jpeg or webp, which
   the server cannot cut, comes back whole with a note that clients may scale it down.
-
 - A failed capture no longer reaches the agent as image bytes. In image mode the API can answer a
   failure with an error-card PNG and no Content-Type — a `strict_country` request whose country
   has no proxy right now is HTTP 404 with a 48 KB card (measured 2026-11-05). The error path read
   that body as text, so the agent got about 47,000 characters of decoded PNG and no country hint;
-  `strict_country` is on by default whenever `country` is set. Image bodies are now never decoded:
-  the agent gets the status, and a 404 card on a strict country request names the country, the
-  countries page and `strict_country: false`.
+  `strict_country` is on by default whenever `country` is set. Image bodies are now never decoded
+  into text: the card goes back as an image next to the error text, because it is the only thing
+  that names the reason (`proxy_navigation_failed` for a host that does not resolve,
+  `country_unavailable` for a country with no proxy).
+- Every failure states its HTTP status and what to do next. A 401 says the key was not accepted,
+  where to set it (`SITESHOT_API_KEY`; in Claude Code `/plugin configure site-shot@site-shot`) and
+  where the key is (https://www.site-shot.com/start/); 1.2.1 said only "Invalid authentication
+  credentials". A 403 keeps the API's text word for word and, when there is none, says it is a plan
+  problem. A 429 says the key runs too many captures at once and that the refusal does not count.
+  A 404 says it is Site-Shot's capture-failed status, not the page's, and that a retry counts
+  toward the month; an HTML error page from a proxy is no longer passed through.
+- A free-plan country refusal is explained. In image mode it carries no text (a 403 card, or an
+  empty 404), so 1.2.1 showed only the status, and its changelog's "reach the agent word for word"
+  held only for JSON mode. With a country other than US, a 403 or 404 without text now says that
+  the free plan allows only the default location or the US and that `strict_country: false` does
+  not lift it. The `strict_country: false` advice for a 404 card is offered only for the case where
+  the card says `country_unavailable`: a host that does not resolve is a 404 card too.
 
 ### Tests
 
 - Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and
   without a country) and an empty 404 body. Check 20 fails on 1.2.1 with a 48,983-character
-  message.
+  message. Check 19 no longer fakes the geo refusal as a text 403, a shape image mode never sends;
+  check 26 replays the two real ones, and check 27 covers 401 and 429.
 
 ## 1.2.1 — 2026-10-31
 
