@@ -52,6 +52,13 @@
   call with the Site-Shot API's own names ran, and counted, as a capture without the wait or the
   full page that was asked for.
 
+### Changed
+
+- The tool description, the README and the MCPB listing no longer promise "fewer vision tokens"
+  from ad and banner removal. Vision models are billed by image size, and the website already
+  says removal does not by itself lower that cost; the claim now reads "cleaner image for the model
+  to read". The MCPB listing also says "public web pages" instead of "any web page".
+
 ### Tests
 
 - Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and

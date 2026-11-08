@@ -768,6 +768,26 @@ test("copy does not imply per-capture charges or promise every page", () => {
   }
 });
 
+// Vision models are billed by image size, so removing ads and banners does not by itself lower
+// vision-token cost; the website says so (/ai-agents/ FAQ). The tool text every agent reads, the
+// README and the MCPB listing used to promise "fewer vision tokens" anyway.
+test("no copy promises fewer vision tokens", async () => {
+  const tools = await servedTools();
+  const copy = {
+    "served tool descriptions": JSON.stringify(tools),
+    "README.md": readme,
+    "manifest.json": read("manifest.json"),
+    "server.json": read("server.json"),
+    "package.json": read("package.json"),
+    "Claude plugin": JSON.stringify(plugin) + JSON.stringify(marketplace),
+    "Codex plugin": JSON.stringify(codexPlugin),
+  };
+  for (const [where, text] of Object.entries(copy)) {
+    assert.doesNotMatch(text, /fewer\s+(?:vision\s+)?tokens|saves?\s+(?:vision\s+)?tokens|lower\s+token/i, `${where}: no token-saving claim`);
+    assert.doesNotMatch(text, /\bany\s+web\s+page\b/i, `${where}: no promise to see any page`);
+  }
+});
+
 // The versions the tests above could not see. Everything they check is a file this
 // suite reads; `serverInfo.version` is a value the server states over the wire during
 // the handshake, and it is what a client -- or a directory reviewer -- actually sees.

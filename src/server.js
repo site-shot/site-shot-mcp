@@ -511,7 +511,7 @@ export function createServer(opts = {}) {
       description:
         "Take a screenshot of a web page with Site-Shot and return it as an image. Renders in a real " +
         "Chromium browser. Supports viewport/device sizing, full-page capture, country proxies, and " +
-        "automatic ad & cookie-banner removal (cleaner image, fewer vision tokens).",
+        "automatic ad & cookie-banner removal (cleaner image for the model to read).",
       // passthrough, not the SDK's default strip: an unknown key has to reach the handler to be
       // refused with a pointer to the right name, instead of vanishing from a capture that runs.
       inputSchema: z

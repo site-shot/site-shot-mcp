@@ -4,7 +4,7 @@ Give Claude, Cursor, and other AI agents the ability to **see public web pages**
 with [Site-Shot](https://www.site-shot.com/) over the [Model Context Protocol](https://modelcontextprotocol.io).
 
 Real Chromium rendering · full-page capture · country proxies · automatic **ad & cookie-banner removal**
-(cleaner images, fewer vision tokens).
+(cleaner images for the model to read).
 
 A Site-Shot API key is required. A confirmed account's API key comes with the free plan: 100 API
 captures a month, no card needed; paid plans start at $5/mo for 2,000. The free plan renews every
