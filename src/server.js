@@ -47,17 +47,26 @@ function imageContent(buf, mimeType) {
       : "";
   const tiles = mimeType === "image/png" && size.height > TILE_MAX_HEIGHT ? tilePng(buf) : null;
   if (tiles) {
+    const end = tiles[tiles.length - 1].y + tiles[tiles.length - 1].height;
+    const left =
+      end < size.height
+        ? ` Rows ${end}-${size.height - 1} at the bottom are not included: at full resolution they ` +
+          `would take this result past about 25,000 tokens, more than Claude Code accepts from one ` +
+          `tool call. Each further capture counts toward the month: format "jpeg" returns the whole ` +
+          `page as one image the client scales down (layout visible, small text not), a smaller width ` +
+          `fits more of the page into the tiles, and max_height captures only the top.`
+        : "";
     const content = [
       {
         type: "text",
         text:
           `This capture is ${dims}, taller than AI clients show at full resolution, so it comes back ` +
           `as ${tiles.length} tiles, top to bottom, each at most ${TILE_MAX_HEIGHT} px tall; ` +
-          `neighbouring tiles overlap by a few rows. It is still one capture.${wide}`,
+          `neighbouring tiles overlap by a few rows. It is still one capture.${wide}${left}`,
       },
     ];
     tiles.forEach((t, i) => {
-      content.push({ type: "text", text: `Tile ${i + 1} of ${tiles.length}: rows ${t.y}-${t.y + t.height} of ${size.height}.` });
+      content.push({ type: "text", text: `Tile ${i + 1} of ${tiles.length}: rows ${t.y}-${t.y + t.height - 1} of ${size.height}.` });
       content.push({ type: "image", data: t.data.toString("base64"), mimeType: "image/png" });
     });
     return content;
@@ -68,9 +77,11 @@ function imageContent(buf, mimeType) {
       text:
         `This capture is ${dims}. AI clients scale an image this large down before the model sees it ` +
         `(Claude refuses anything over 8000 px on a side), so small text may be unreadable.` +
-        (size.height > TILE_MAX_HEIGHT
-          ? ` For a readable full page, capture with format "png", which comes back in tiles, or cap the height with max_height.`
-          : wide),
+        (size.height <= TILE_MAX_HEIGHT
+          ? wide
+          : mimeType === "image/png"
+            ? ` This PNG could not be cut into tiles; cap the height with max_height for sharper text.`
+            : ` For a readable full page, capture with format "png", which comes back in tiles, or cap the height with max_height.`),
     },
     ...whole,
   ];
@@ -551,7 +562,9 @@ export function createServer(opts = {}) {
         "Take a full-page (entire scrollable height) screenshot of a web page with Site-Shot and return " +
         "it as an image. Convenience wrapper around capture_screenshot with full-page capture enabled. " +
         "A PNG taller than 2000 px comes back as several image tiles, top to bottom, so text stays " +
-        "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down.",
+        "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down. " +
+        "Tiles are full-resolution images, about 2,700 tokens per 1024 x 2000 tile, and stop at about " +
+        "18,000 tokens; the note names any rows left out at the bottom.",
       inputSchema: toolInputSchema(baseInputShape, { ...API_PARAM_HINTS, ...FULL_PAGE_TOOL_HINTS }),
     },
     (args, extra) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal }),

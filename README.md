@@ -233,9 +233,9 @@ An argument the tools do not take is refused before any capture, with the name t
 Site-Shot API's own names such as `delay_time`, `full_size` or `no_ads` map to `wait_ms`,
 `full_page` and `block_ads` here.
 
-Every failure starts with the HTTP status and says what to do next (for example, a 401 points to
-where the key is set). When the API answers with an error card instead of a screenshot, the card is
-attached as an image, because it names the reason.
+Every failure from the API names its HTTP status and says what to do next (for example, a 401
+points to where the key is set). When the API answers with an error card instead of a screenshot,
+the card is attached as an image, because it names the reason.
 
 ### `capture_full_page`
 Same as `capture_screenshot` with full-page capture enabled.
@@ -243,8 +243,11 @@ Same as `capture_screenshot` with full-page capture enabled.
 A PNG taller than 2000 px comes back as several image tiles, top to bottom, each at most 2000 px
 tall, with a short text label per tile. AI clients scale large images down before the model sees
 them (Claude refuses anything over 8000 px on a side), so one 10,000 px image would arrive with its
-text unreadable. The tiles are cut from the one capture; they cost nothing extra. A tall `jpeg` or
-`webp` comes back whole, with a note.
+text unreadable. The tiles are cut from the one capture, so they need no extra capture. Each tile
+is a full-resolution image the model reads, so a tall page uses far more context than one scaled-down
+image: about 2,700 tokens for a 1024 x 2000 tile. Tiles stop at about 18,000 tokens in all (six tiles,
+the top 11,760 rows, at 1024 px wide), under the 25,000 Claude Code takes from one tool call; the
+note names any rows left out at the bottom. A tall `jpeg` or `webp` comes back whole, with a note.
 
 ## Why call this server instead of the agent's own browser?
 

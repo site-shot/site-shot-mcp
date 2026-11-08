@@ -59,7 +59,10 @@ Be explicit about anything that changes what the image shows:
   to click through, pass `false` for the one that matters.
 
 A full page taller than 2000 px comes back as several image tiles, top to bottom, each labelled
-with the rows it covers. Read them in order as one page; neighbouring tiles share a few rows.
+with the rows it covers. Read them in order as one page; neighbouring tiles share a few rows. Tiles
+are full-resolution images and use a lot of context, so they stop at about 18,000 tokens: on a very
+tall page the note names the rows left out at the bottom. Say so rather than describe a part you
+did not see.
 
 Then read the returned image and answer from what it actually shows, not from what the page is
 supposed to contain.
@@ -78,7 +81,7 @@ their signed-in view.
 
 ## When a capture fails
 
-The error text starts with the HTTP status. Report it, with the next step for the person:
+A failure from the API names its HTTP status. Report it, with the next step for the person:
 
 - HTTP 401, "Invalid authentication credentials": the key is wrong. With the Claude Code plugin they
   enter it again with `/plugin configure site-shot@site-shot`; elsewhere they fix `SITESHOT_API_KEY`.
@@ -91,6 +94,9 @@ The error text starts with the HTTP status. Report it, with the next step for th
 - HTTP 429: a capture is already running on this key. Wait for it to finish.
 - HTTP 404 with an error card attached: Site-Shot could not render the page. The card names the
   reason; read it before saying anything about the page itself.
+- HTTP 404 with no card, or a 403 with no text, after a `country` other than US: on a free-plan key
+  that is the free plan refusing the country (paid plans at https://www.site-shot.com/pricing/);
+  otherwise Site-Shot could not render the page. The error text says which cases are possible.
 
 ## Scope
 

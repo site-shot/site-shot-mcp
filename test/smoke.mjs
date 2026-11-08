@@ -618,4 +618,46 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/30 smoke checks passed`);
+// 31) Tiles stop before the result outgrows what a client takes from one tool call, and the note
+// names the rows left out. Claude Code 2.1.283 flagged ten 1280 x 2000 tiles as "[OUTPUT TRUNCATED
+// - exceeded 25000 token limit]" although nothing was cut. Labels give inclusive row ranges, and a
+// PNG that cannot be cut is not told to switch to png.
+{
+  const W = 1600;
+  const H = 8000;
+  const page = encodePng(W, H, (x, y) => [y & 0xff, x & 0xff, 7, 255]);
+  let calls = 0;
+  const res = await captureScreenshot(
+    { url: "https://example.com", full_page: true },
+    { apiKey: "K", fetchImpl: async () => (calls++, fakeImageResponse(new Uint8Array(page))) },
+  );
+  assert.equal(calls, 1);
+  const images = res.content.filter((c) => c.type === "image");
+  let pixels = 0;
+  for (const img of images) {
+    const t = decodePng(Buffer.from(img.data, "base64"));
+    pixels += t.width * t.height;
+  }
+  assert.ok(pixels / 750 <= 20000, `tiles stay near 18k tokens (estimated ${Math.round(pixels / 750)})`);
+  const labels = res.content.filter((c) => c.type === "text").slice(1).map((c) => c.text);
+  assert.equal(labels[0], `Tile 1 of ${images.length}: rows 0-1999 of ${H}.`, "inclusive row range");
+  const end = Number(/rows \d+-(\d+)/.exec(labels[labels.length - 1])[1]) + 1;
+  assert.ok(end < H, "this page is too tall for the budget at 1600 px");
+  assert.ok(res.content[0].text.includes(`Rows ${end}-${H - 1} at the bottom are not included`), "names the rows left out");
+  assert.match(res.content[0].text, /25,000 tokens/);
+  assert.match(res.content[0].text, /counts toward the month/);
+
+  // An interlaced PNG goes back whole; the advice is not "use png".
+  const interlaced = Buffer.from(encodePng(4, 2500, () => [1, 2, 3, 255]));
+  interlaced[28] = 1; // IHDR interlace method
+  const whole = await captureScreenshot(
+    { url: "https://example.com", full_page: true },
+    { apiKey: "K", fetchImpl: async () => fakeImageResponse(new Uint8Array(interlaced)) },
+  );
+  assert.deepEqual(whole.content.map((c) => c.type), ["text", "image"]);
+  assert.doesNotMatch(whole.content[0].text, /format "png"/);
+  assert.match(whole.content[0].text, /could not be cut into tiles/);
+  passed++;
+}
+
+console.log(`ok — ${passed}/31 smoke checks passed`);

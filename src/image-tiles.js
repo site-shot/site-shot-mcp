@@ -10,6 +10,13 @@ import { deflateSync, inflateSync } from "node:zlib";
 export const TILE_MAX_HEIGHT = 2000;
 /** Consecutive tiles share this many rows, so a line of text cut by one edge is whole in the other. */
 export const TILE_OVERLAP = 48;
+/**
+ * Pixels all tiles of one result may hold together: about 18,000 tokens at the usual estimate of
+ * width x height / 750 per image. Claude Code flags a tool result over 25,000 tokens as truncated
+ * (MAX_MCP_OUTPUT_TOKENS) even when nothing was cut; measured with 2.1.283, ten 1280 px tiles drew
+ * that notice. Tiles past this budget are left out, and the note says which rows.
+ */
+export const TILE_PIXEL_BUDGET = 13_500_000;
 /** Above this, an image is said to be too large for many clients to show at full resolution. */
 export const CLIENT_MAX_SIDE = 2000;
 // Decoding needs the whole inflated pixel buffer in memory. 1024 x 20000 RGBA is about 82 MB;
@@ -100,11 +107,12 @@ export function tileStarts(height, maxHeight = TILE_MAX_HEIGHT, overlap = TILE_O
 }
 
 /**
- * Cut a PNG into horizontal tiles no taller than `maxHeight`.
+ * Cut a PNG into horizontal tiles no taller than `maxHeight`, from the top, stopping before the
+ * tiles together would hold more than `maxPixels` (always at least one tile).
  * Returns [{ y, height, data }] (data is a complete PNG), or null when the PNG is one this
  * does not handle (interlaced, malformed, too large to decode) and must go back whole.
  */
-export function tilePng(buf, { maxHeight = TILE_MAX_HEIGHT, overlap = TILE_OVERLAP } = {}) {
+export function tilePng(buf, { maxHeight = TILE_MAX_HEIGHT, overlap = TILE_OVERLAP, maxPixels = TILE_PIXEL_BUDGET } = {}) {
   if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
   let ihdr;
   const copied = [];
@@ -142,8 +150,9 @@ export function tilePng(buf, { maxHeight = TILE_MAX_HEIGHT, overlap = TILE_OVERL
   }
   if (raw.length !== expected) return null;
 
-  const starts = tileStarts(height, maxHeight, overlap);
-  if (starts.length === 1) return null;
+  const all = tileStarts(height, maxHeight, overlap);
+  if (all.length === 1) return null;
+  const starts = all.slice(0, Math.max(1, Math.floor(maxPixels / (width * maxHeight))));
 
   // One pass undoes the row filters, keeping only the rows a tile starts on. Every other row of a
   // tile is copied filtered, exactly as the API encoded it: its filter refers to the row above,

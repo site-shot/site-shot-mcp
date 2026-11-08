@@ -16,7 +16,12 @@
   at 197 x 2000 and the model could not read its text. A PNG taller than 2000 px now comes back
   as tiles, top to bottom, each at most 2000 px tall and overlapping by a few rows, cut from the
   one capture the API returned (no extra capture, no new dependency). A tall jpeg or webp, which
-  the server cannot cut, comes back whole with a note that clients may scale it down.
+  the server cannot cut, comes back whole with a note that clients may scale it down. Tiles are
+  full-resolution images (about 2,700 tokens per 1024 x 2000 tile), so they stop at about 18,000
+  tokens, under the 25,000 Claude Code takes from one tool call: at 1024 px wide that is the top
+  11,760 rows, and the note names the rows left out and how to see them (each way is another
+  capture). Ten 1280 px tiles drew a false "[OUTPUT TRUNCATED - exceeded 25000 token limit]" in
+  Claude Code 2.1.283. Tile labels give inclusive row ranges (0-1999).
 - A failed capture no longer reaches the agent as image bytes. In image mode the API can answer a
   failure with an error-card PNG and no Content-Type — a `strict_country` request whose country
   has no proxy right now is HTTP 404 with a 48 KB card (measured 2026-11-05). The error path read
