@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { captureScreenshot, createServer } from "../src/server.js";
+import { captureScreenshot, createServer, placeholderKeyMessage } from "../src/server.js";
 import { decodePng, encodePng } from "./png-helpers.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -450,6 +450,20 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
     assert.match(text, /did not substitute/);
     assert.ok(text.includes('env_vars = ["SITESHOT_API_KEY"]'), "gives the Codex fix");
     assert.match(text, /https:\/\/www\.site-shot\.com\/start\//);
+  }
+  // A value that may hold a real key pasted into a template is caught but never quoted back: the
+  // message goes into the transcript and, at startup, the client's logs.
+  for (const key of ["<a1b2c3d4-e5f6-7890>", "${a1b2c3d4-e5f6-7890}"]) {
+    let fetched = false;
+    const res = await captureScreenshot(
+      { url: "https://example.com" },
+      { apiKey: key, fetchImpl: async () => ((fetched = true), fakeImageResponse(PNG)) },
+    );
+    assert.equal(res.isError, true, `${key} is caught`);
+    assert.equal(fetched, false);
+    assert.ok(!res.content[0].text.includes("a1b2c3d4"), `${key}: the value is not echoed`);
+    assert.match(res.content[0].text, /not shown here/);
+    assert.ok(!placeholderKeyMessage(key).includes("a1b2c3d4"), "nor in the startup warning");
   }
   // A real key that merely contains a dollar sign or braces is still sent.
   let fetched = 0;

@@ -9,7 +9,9 @@
   key itself in the server's setting or the client's environment; under Codex, replace an `env`
   table with `env_vars = ["SITESHOT_API_KEY"]`, because Codex passes `${...}` through literally
   (measured with Codex 0.147.0). Before, the API refused the text as a key and the agent saw only
-  "Invalid authentication credentials".
+  "Invalid authentication credentials". Only a variable name or `YOUR_API_KEY` is quoted back; a
+  value in angle brackets, or a `${...}` around something that is not a name, may be a real key
+  pasted into a template, so it is caught without being echoed into the transcript or the logs.
 - A full-page capture is readable again. It came back as one image as tall as the page (1024 x
   10381 px for the Site-Shot homepage, up to 20,000 px by default); Claude refuses images over
   8000 px on a side and scales a long edge over about 2000 px down, so Claude Code showed that page

@@ -93,12 +93,22 @@ function imageContent(buf, mimeType) {
 // only "Invalid authentication credentials".
 const PLACEHOLDER_KEY = /^\$\{[^}]*\}$|^\$[A-Za-z_][A-Za-z0-9_]*$|^%[A-Za-z_][A-Za-z0-9_]*%$|^<[^>]*>$|^YOUR[_ -]?(?:SITE[_ -]?SHOT[_ -]?)?API[_ -]?KEY$/i;
 
+// Only these shapes are quoted back: a variable name cannot be a secret. Anything else that matched
+// (text in angle brackets, a ${...} around something that is not a name) may be a real key pasted
+// into a template, and the message lands in the transcript and the client's logs.
+const QUOTABLE_PLACEHOLDER = /^\$\{[A-Za-z_][A-Za-z0-9_.]*\}$|^\$[A-Za-z_][A-Za-z0-9_]*$|^%[A-Za-z_][A-Za-z0-9_]*%$|^YOUR[_ -]?(?:SITE[_ -]?SHOT[_ -]?)?API[_ -]?KEY$/i;
+
 /** The agent-facing explanation for a placeholder key, or null when the key is not one. */
 export function placeholderKeyMessage(apiKey) {
   const key = String(apiKey ?? "").trim();
   if (!PLACEHOLDER_KEY.test(key)) return null;
+  const received = QUOTABLE_PLACEHOLDER.test(key)
+    ? `the placeholder text "${key}"`
+    : key.startsWith("<")
+      ? "text in angle brackets (not shown here: it may hold the key)"
+      : "a ${...} reference (not shown here: it may hold the key)";
   return (
-    `The Site-Shot API key this server received is the placeholder text "${key}", not a key: ` +
+    `The Site-Shot API key this server received is ${received}, not a key: ` +
     `the MCP client did not substitute it. Put the key itself in the server's SITESHOT_API_KEY ` +
     `setting, or set SITESHOT_API_KEY in the environment the client starts from. Codex does not ` +
     `expand \${...} in an env table: replace that table with env_vars = ["SITESHOT_API_KEY"] ` +
