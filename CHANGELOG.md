@@ -39,12 +39,21 @@
   not lift it. The `strict_country: false` advice for a 404 card is offered only for the case where
   the card says `country_unavailable`: a host that does not resolve is a 404 card too.
 
+- The 90-second deadline now covers the whole exchange. It was cleared as soon as the response
+  headers arrived, so a body that stalled afterwards (error cards come chunked) was read with no
+  deadline. A client's cancellation (`notifications/cancelled`) now aborts the upstream request
+  instead of leaving it running. The timeout message says the capture may still finish on
+  Site-Shot's side and count toward the month, and a network error no longer echoes text that
+  could quote the request URL with the key in it.
+
 ### Tests
 
 - Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and
   without a country) and an empty 404 body. Check 20 fails on 1.2.1 with a 48,983-character
   message. Check 19 no longer fakes the geo refusal as a text 403, a shape image mode never sends;
-  check 26 replays the two real ones, and check 27 covers 401 and 429.
+  check 26 replays the two real ones, and check 27 covers 401 and 429. Checks 23-25 cover tiles
+  and placeholder keys; check 28 a body that stalls after the headers, check 29 a cancelled call
+  over a real MCP session.
 
 ## 1.2.1 — 2026-10-31
 

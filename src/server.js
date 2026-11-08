@@ -103,7 +103,7 @@ function imageMime(buf) {
   return "image/png";
 }
 
-export async function captureScreenshot(args, { apiKey, fetchImpl }) {
+export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeoutMs = REQUEST_TIMEOUT_MS }) {
   const placeholder = placeholderKeyMessage(apiKey);
   if (placeholder) return { isError: true, content: [{ type: "text", text: placeholder }] };
   if (!apiKey) {
@@ -214,25 +214,62 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
 
   const endpoint = `${API_BASE}?${params.toString()}`;
 
+  // One deadline for the whole exchange, body included: fetch resolves as soon as the headers
+  // arrive, and an error card comes chunked, so a deadline cleared at that point stopped guarding
+  // the part that can stall. A client's notifications/cancelled aborts the same way, so a
+  // cancelled call does not keep the upstream request running.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let stopped = null;
+  const stop = (why) => {
+    if (stopped) return;
+    stopped = why;
+    controller.abort();
+  };
+  const timer = setTimeout(() => stop("timeout"), timeoutMs);
+  const onCancel = () => stop("cancelled");
+  if (signal?.aborted) onCancel();
+  else signal?.addEventListener?.("abort", onCancel, { once: true });
+  const aborted = new Promise((_, reject) => {
+    const fail = () => reject(new Error("aborted"));
+    if (controller.signal.aborted) fail();
+    else controller.signal.addEventListener("abort", fail, { once: true });
+  });
+  aborted.catch(() => {});
+  const guard = (promise) => Promise.race([promise, aborted]);
+
   let res;
+  let body = null;
   try {
-    res = await fetchImpl(endpoint, { signal: controller.signal });
+    res = await guard(fetchImpl(endpoint, { signal: controller.signal }));
+    try {
+      body = await guard(
+        typeof res.arrayBuffer === "function"
+          ? res.arrayBuffer().then((b) => Buffer.from(b))
+          : res.text().then((t) => Buffer.from(t, "utf8")),
+      );
+    } catch (err) {
+      if (stopped) throw err;
+    }
   } catch (err) {
+    let reason;
+    if (stopped === "cancelled") reason = "the client cancelled the call";
+    else if (stopped === "timeout" || err?.name === "AbortError") {
+      reason =
+        `timed out after ${Math.round(timeoutMs / 1000)} s. The capture may still finish on Site-Shot's ` +
+        `side and count toward the month; heavy pages can take longer, and trying again is another capture`;
+    } else reason = String(err).split(apiKey).join("***"); // a fetch error may quote the URL, which holds the key
+    return { isError: true, content: [{ type: "text", text: `Site-Shot request failed: ${reason}.` }] };
+  } finally {
     clearTimeout(timer);
-    const reason = err?.name === "AbortError" ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s` : String(err);
-    return { isError: true, content: [{ type: "text", text: `Site-Shot request failed: ${reason}` }] };
+    signal?.removeEventListener?.("abort", onCancel);
   }
-  clearTimeout(timer);
 
   const contentType = (res.headers?.get?.("content-type") || "").toLowerCase();
 
   // Success path: the API returns the image bytes directly.
-  if (res.ok && contentType.startsWith("image/")) {
-    const buf = Buffer.from(await res.arrayBuffer());
+  if (res.ok && contentType.startsWith("image/") && body) {
     const mimeType = contentType.split(";")[0] || (format === "jpeg" ? "image/jpeg" : "image/png");
-    return { content: imageContent(buf, mimeType) };
+    return { content: imageContent(body, mimeType) };
   }
 
   // Error path. The status is the one thing every failure carries, so it leads every message, and
@@ -243,10 +280,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   let apiText = "";
   let card = null;
   try {
-    const body =
-      typeof res.arrayBuffer === "function"
-        ? Buffer.from(await res.arrayBuffer())
-        : Buffer.from(await res.text(), "utf8");
+    if (!body) throw new Error("no body");
     if (looksLikeImage(body, contentType)) {
       card = body;
     } else {
@@ -455,7 +489,7 @@ export function createServer(opts = {}) {
           ),
       },
     },
-    (args) => captureScreenshot(args, { apiKey, fetchImpl }),
+    (args, extra) => captureScreenshot(args, { apiKey, fetchImpl, signal: extra?.signal }),
   );
 
   server.registerTool(
@@ -469,7 +503,7 @@ export function createServer(opts = {}) {
         "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down.",
       inputSchema: baseInputShape,
     },
-    (args) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl }),
+    (args, extra) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal }),
   );
 
   return server;

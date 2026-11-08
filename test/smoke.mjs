@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { captureScreenshot, createServer } from "../src/server.js";
 import { decodePng, encodePng } from "./png-helpers.mjs";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 // Minimal Response-like stub.
 function fakeImageResponse(bytes, contentType = "image/png") {
@@ -511,4 +513,63 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/27 smoke checks passed`);
+// 28) The deadline still guards the body once the headers are in. An error card comes chunked;
+// before this, a body that stalled after the headers held the call open with no deadline at all.
+{
+  const card = new Uint8Array(64);
+  card.set(PNG, 0);
+  const stalled = (status, contentType) => async () => ({
+    ok: status === 200,
+    status,
+    headers: { get: (h) => (h.toLowerCase() === "content-type" ? contentType : null) },
+    arrayBuffer: () => new Promise(() => {}),
+  });
+  for (const [status, type] of [[200, "image/png"], [404, null]]) {
+    let late;
+    const res = await Promise.race([
+      captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl: stalled(status, type), timeoutMs: 50 }),
+      new Promise((resolve) => (late = setTimeout(() => resolve("still waiting"), 2000))),
+    ]);
+    clearTimeout(late);
+    assert.notEqual(res, "still waiting", `HTTP ${status}: the stalled body read ends at the deadline`);
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text, /timed out/);
+    assert.match(res.content[0].text, /count toward the month/, "says the capture may still count");
+  }
+
+  // A network error can quote the request URL, and the URL carries the key.
+  const res = await captureScreenshot(
+    { url: "https://example.com" },
+    { apiKey: "SECRET-KEY-123", fetchImpl: async (url) => { throw new TypeError(`fetch failed for ${url}`); } },
+  );
+  assert.equal(res.isError, true);
+  assert.doesNotMatch(res.content[0].text, /SECRET-KEY-123/, "the key never reaches the tool result");
+  passed++;
+}
+
+// 29) A client that cancels the call (notifications/cancelled) stops the upstream request too.
+{
+  let upstream;
+  const fetchImpl = (url, { signal }) => {
+    upstream = signal;
+    return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+  };
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer({ apiKey: "K", fetchImpl });
+  const client = new Client({ name: "smoke", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const ac = new AbortController();
+  const call = client
+    .callTool({ name: "capture_full_page", arguments: { url: "https://example.com" } }, undefined, { signal: ac.signal })
+    .catch((e) => e);
+  for (let i = 0; i < 50 && !upstream; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(upstream, "the capture reached fetch");
+  ac.abort("user pressed stop");
+  await call;
+  for (let i = 0; i < 50 && !upstream.aborted; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(upstream.aborted, true, "the upstream request was aborted with the call");
+  await client.close();
+  passed++;
+}
+
+console.log(`ok — ${passed}/29 smoke checks passed`);
