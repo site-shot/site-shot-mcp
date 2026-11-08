@@ -228,6 +228,12 @@ Returns the screenshot as an MCP image.
 ### `capture_full_page`
 Same as `capture_screenshot` with full-page capture enabled.
 
+A PNG taller than 2000 px comes back as several image tiles, top to bottom, each at most 2000 px
+tall, with a short text label per tile. AI clients scale large images down before the model sees
+them (Claude refuses anything over 8000 px on a side), so one 10,000 px image would arrive with its
+text unreadable. The tiles are cut from the one capture; they cost nothing extra. A tall `jpeg` or
+`webp` comes back whole, with a note.
+
 ## Why call this server instead of the agent's own browser?
 
 If your agent drives a browser, it can screenshot pages itself — and for pages that must be signed

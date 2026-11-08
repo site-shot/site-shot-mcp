@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- A full-page capture is readable again. It came back as one image as tall as the page (1024 x
+  10381 px for the Site-Shot homepage, up to 20,000 px by default); Claude refuses images over
+  8000 px on a side and scales a long edge over about 2000 px down, so Claude Code showed that page
+  at 197 x 2000 and the model could not read its text. A PNG taller than 2000 px now comes back
+  as tiles, top to bottom, each at most 2000 px tall and overlapping by a few rows, cut from the
+  one capture the API returned (no extra capture, no new dependency). A tall jpeg or webp, which
+  the server cannot cut, comes back whole with a note that clients may scale it down.
+
 - A failed capture no longer reaches the agent as image bytes. In image mode the API can answer a
   failure with an error-card PNG and no Content-Type — a `strict_country` request whose country
   has no proxy right now is HTTP 404 with a 48 KB card (measured 2026-11-05). The error path read

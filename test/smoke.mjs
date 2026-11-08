@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { captureScreenshot, createServer } from "../src/server.js";
+import { decodePng, encodePng } from "./png-helpers.mjs";
 
 // Minimal Response-like stub.
 function fakeImageResponse(bytes, contentType = "image/png") {
@@ -356,4 +357,66 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/22 smoke checks passed`);
+// 23) A full page taller than clients show at full resolution comes back as PNG tiles, each at most
+// 2000 px tall, top to bottom, that together hold every row of the one capture pixel for pixel.
+// Measured 2026-11-08: the Site-Shot homepage is 1024 x 10381; as one image Claude Code showed it
+// at 197 x 2000 and the model could not read its text.
+{
+  const W = 9;
+  const H = 4321;
+  const pixel = (x, y) => [(x * 37 + y) & 0xff, (y * 13) & 0xff, (x ^ y) & 0xff, 255 - (y & 0x7f)];
+  const page = encodePng(W, H, pixel);
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    return fakeImageResponse(new Uint8Array(page));
+  };
+  const res = await captureScreenshot({ url: "https://example.com", full_page: true }, { apiKey: "K", fetchImpl });
+  assert.equal(res.isError, undefined);
+  assert.equal(calls, 1, "one capture, however many tiles");
+  const images = res.content.filter((c) => c.type === "image");
+  assert.ok(images.length >= 3, `a ${H} px page needs at least three 2000 px tiles (got ${images.length})`);
+  assert.equal(res.content[0].type, "text", "a note says the image comes in tiles");
+  assert.match(res.content[0].text, new RegExp(`${W} x ${H} px`));
+  assert.match(res.content[0].text, new RegExp(`${images.length} tiles`));
+  let covered = 0;
+  for (const [i, img] of images.entries()) {
+    assert.equal(img.mimeType, "image/png");
+    const tile = decodePng(Buffer.from(img.data, "base64"));
+    assert.equal(tile.width, W, "tiles keep the full width");
+    assert.ok(tile.height <= 2000, `tile ${i + 1} is at most 2000 px tall (got ${tile.height})`);
+    const label = res.content[res.content.indexOf(img) - 1].text;
+    const top = Number(/rows (\d+)-/.exec(label)?.[1]);
+    assert.ok(top <= covered, `tile ${i + 1} starts at or above the last row already covered`);
+    for (let y = 0; y < tile.height; y++) {
+      const want = Buffer.alloc(W * 4);
+      for (let x = 0; x < W; x++) Buffer.from(pixel(x, top + y)).copy(want, x * 4);
+      if (!tile.rows[y].equals(want)) assert.fail(`tile ${i + 1} row ${y} differs from page row ${top + y}`);
+    }
+    covered = top + tile.height;
+  }
+  assert.equal(covered, H, "the last tile ends on the page's last row");
+  passed++;
+}
+
+// 24) An image that fits stays one image with no note, and a tall image the server cannot cut
+// (here a JPEG) goes back whole with a note that it may be scaled down.
+{
+  const small = encodePng(4, 2000, () => [1, 2, 3, 255]);
+  let res = await captureScreenshot({ url: "https://example.com" }, { apiKey: "K", fetchImpl: async () => fakeImageResponse(new Uint8Array(small)) });
+  assert.deepEqual(res.content.map((c) => c.type), ["image"], "a 2000 px image is not cut");
+
+  // SOI, then a baseline SOF0 frame header for a 1024 x 9000 image.
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x23, 0x28, 0x04, 0x00, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xff, 0xd9]);
+  res = await captureScreenshot(
+    { url: "https://example.com", full_page: true, format: "jpeg" },
+    { apiKey: "K", fetchImpl: async () => fakeImageResponse(jpeg, "image/jpeg") },
+  );
+  assert.deepEqual(res.content.map((c) => c.type), ["text", "image"]);
+  assert.match(res.content[0].text, /1024 x 9000 px/);
+  assert.match(res.content[0].text, /format "png"/, "names the format that comes back readable");
+  assert.equal(res.content[1].mimeType, "image/jpeg");
+  passed++;
+}
+
+console.log(`ok — ${passed}/24 smoke checks passed`);

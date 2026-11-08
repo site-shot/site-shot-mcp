@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { CLIENT_MAX_SIDE, TILE_MAX_HEIGHT, imageSize, tilePng } from "./image-tiles.js";
 
 // Read from package.json rather than repeating the number here. A literal in this file
 // is a second place a release has to remember to touch, and it was already missed once:
@@ -28,6 +29,51 @@ function looksLikeImage(buf, contentType) {
   if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
   return buf.length >= 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP";
+}
+
+/**
+ * The MCP content for one captured image. A tall PNG goes back as tiles a client can read at full
+ * resolution; any other image the client may have to downscale goes back whole, with a note
+ * saying so, instead of silently arriving as unreadable text.
+ */
+function imageContent(buf, mimeType) {
+  const whole = [{ type: "image", data: buf.toString("base64"), mimeType }];
+  const size = imageSize(buf);
+  if (!size || (size.height <= TILE_MAX_HEIGHT && size.width <= CLIENT_MAX_SIDE)) return whole;
+  const dims = `${size.width} x ${size.height} px`;
+  const wide =
+    size.width > CLIENT_MAX_SIDE
+      ? ` It is wider than ${CLIENT_MAX_SIDE} px, so clients may still scale it down; a smaller width keeps text sharper.`
+      : "";
+  const tiles = mimeType === "image/png" && size.height > TILE_MAX_HEIGHT ? tilePng(buf) : null;
+  if (tiles) {
+    const content = [
+      {
+        type: "text",
+        text:
+          `This capture is ${dims}, taller than AI clients show at full resolution, so it comes back ` +
+          `as ${tiles.length} tiles, top to bottom, each at most ${TILE_MAX_HEIGHT} px tall; ` +
+          `neighbouring tiles overlap by a few rows. It is still one capture.${wide}`,
+      },
+    ];
+    tiles.forEach((t, i) => {
+      content.push({ type: "text", text: `Tile ${i + 1} of ${tiles.length}: rows ${t.y}-${t.y + t.height} of ${size.height}.` });
+      content.push({ type: "image", data: t.data.toString("base64"), mimeType: "image/png" });
+    });
+    return content;
+  }
+  return [
+    {
+      type: "text",
+      text:
+        `This capture is ${dims}. AI clients scale an image this large down before the model sees it ` +
+        `(Claude refuses anything over 8000 px on a side), so small text may be unreadable.` +
+        (size.height > TILE_MAX_HEIGHT
+          ? ` For a readable full page, capture with format "png", which comes back in tiles, or cap the height with max_height.`
+          : wide),
+    },
+    ...whole,
+  ];
 }
 
 export async function captureScreenshot(args, { apiKey, fetchImpl }) {
@@ -157,9 +203,7 @@ export async function captureScreenshot(args, { apiKey, fetchImpl }) {
   if (res.ok && contentType.startsWith("image/")) {
     const buf = Buffer.from(await res.arrayBuffer());
     const mimeType = contentType.split(";")[0] || (format === "jpeg" ? "image/jpeg" : "image/png");
-    return {
-      content: [{ type: "image", data: buf.toString("base64"), mimeType }],
-    };
+    return { content: imageContent(buf, mimeType) };
   }
 
   // Error path: surface whatever the API said (often a JSON or text error body) — unless the
@@ -324,7 +368,10 @@ export function createServer(opts = {}) {
         full_page: z
           .boolean()
           .optional()
-          .describe("Capture the entire scrollable page instead of just the viewport. Default: false."),
+          .describe(
+            "Capture the entire scrollable page instead of just the viewport. Default: false. A PNG " +
+              "taller than 2000 px comes back as several image tiles, top to bottom (still one capture).",
+          ),
       },
     },
     (args) => captureScreenshot(args, { apiKey, fetchImpl }),
@@ -336,7 +383,9 @@ export function createServer(opts = {}) {
       title: "Capture full-page website screenshot",
       description:
         "Take a full-page (entire scrollable height) screenshot of a web page with Site-Shot and return " +
-        "it as an image. Convenience wrapper around capture_screenshot with full-page capture enabled.",
+        "it as an image. Convenience wrapper around capture_screenshot with full-page capture enabled. " +
+        "A PNG taller than 2000 px comes back as several image tiles, top to bottom, so text stays " +
+        "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down.",
       inputSchema: baseInputShape,
     },
     (args) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl }),
