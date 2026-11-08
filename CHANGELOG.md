@@ -111,7 +111,9 @@
   message. Check 19 no longer fakes the geo refusal as a text 403, a shape image mode never sends;
   check 26 replays the two real ones, and check 27 covers 401 and 429. Checks 23-25 cover tiles
   and placeholder keys; check 28 a body that stalls after the headers, check 29 a cancelled call
-  over a real MCP session, check 30 arguments the tools do not take.
+  over a real MCP session, check 30 arguments the tools do not take (and that the served schemas
+  still say `additionalProperties: false`), check 31 the tile budget and its note, check 32
+  progress notifications that outlast a 200 ms client timeout.
 
 ## 1.2.1 — 2026-10-31
 
