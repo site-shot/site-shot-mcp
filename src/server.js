@@ -76,7 +76,30 @@ function imageContent(buf, mimeType) {
   ];
 }
 
+// A key that is still a placeholder means the MCP client copied its config text through instead
+// of substituting it. Codex, for one, passes "${SITESHOT_API_KEY}" in an env table literally
+// (measured with Codex 0.147.0); the API would refuse it as a bad key and the agent would be told
+// only "Invalid authentication credentials".
+const PLACEHOLDER_KEY = /^\$\{[^}]*\}$|^\$[A-Za-z_][A-Za-z0-9_]*$|^%[A-Za-z_][A-Za-z0-9_]*%$|^<[^>]*>$|^YOUR[_ -]?(?:SITE[_ -]?SHOT[_ -]?)?API[_ -]?KEY$/i;
+
+/** The agent-facing explanation for a placeholder key, or null when the key is not one. */
+export function placeholderKeyMessage(apiKey) {
+  const key = String(apiKey ?? "").trim();
+  if (!PLACEHOLDER_KEY.test(key)) return null;
+  return (
+    `The Site-Shot API key this server received is the placeholder text "${key}", not a key: ` +
+    `the MCP client did not substitute it. Put the key itself in the server's SITESHOT_API_KEY ` +
+    `setting, or set SITESHOT_API_KEY in the environment the client starts from. Codex does not ` +
+    `expand \${...} in an env table: replace that table with env_vars = ["SITESHOT_API_KEY"] ` +
+    `(https://github.com/site-shot/site-shot-mcp#codex-cli-plugin). In Claude Code with the ` +
+    `site-shot plugin, run /plugin configure site-shot@site-shot. Your key is at ` +
+    `https://www.site-shot.com/start/.`
+  );
+}
+
 export async function captureScreenshot(args, { apiKey, fetchImpl }) {
+  const placeholder = placeholderKeyMessage(apiKey);
+  if (placeholder) return { isError: true, content: [{ type: "text", text: placeholder }] };
   if (!apiKey) {
     return {
       isError: true,

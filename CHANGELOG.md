@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- A key that is still a placeholder (`${SITESHOT_API_KEY}`, `$SITESHOT_API_KEY`, `YOUR_API_KEY`)
+  is caught before any request, at startup on stderr and in the tool result, with the fix: put the
+  key itself in the server's setting or the client's environment; under Codex, replace an `env`
+  table with `env_vars = ["SITESHOT_API_KEY"]`, because Codex passes `${...}` through literally
+  (measured with Codex 0.147.0). Before, the API refused the text as a key and the agent saw only
+  "Invalid authentication credentials".
 - A full-page capture is readable again. It came back as one image as tall as the page (1024 x
   10381 px for the Site-Shot homepage, up to 20,000 px by default); Claude refuses images over
   8000 px on a side and scales a long edge over about 2000 px down, so Claude Code showed that page

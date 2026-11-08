@@ -419,4 +419,37 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/24 smoke checks passed`);
+// 25) A key that is still a placeholder is caught before any capture, with the fix spelled out.
+// Codex hands "${SITESHOT_API_KEY}" from an env table to the server literally (measured, Codex
+// 0.147.0, as a Tessl install writes it); before this the agent saw only "Invalid authentication
+// credentials" and a capture attempt went to the API.
+{
+  for (const key of ["${SITESHOT_API_KEY}", "${user_config.SITESHOT_API_KEY}", "$SITESHOT_API_KEY", "YOUR_API_KEY"]) {
+    let fetched = false;
+    const fetchImpl = async () => {
+      fetched = true;
+      return fakeErrorResponse(401, JSON.stringify({ message: "Invalid authentication credentials" }));
+    };
+    const res = await captureScreenshot({ url: "https://example.com" }, { apiKey: key, fetchImpl });
+    assert.equal(res.isError, true, `${key} is not a key`);
+    assert.equal(fetched, false, `${key}: no request is sent with a placeholder key`);
+    const text = res.content[0].text;
+    assert.ok(text.includes(`"${key}"`), "names what the server received");
+    assert.match(text, /did not substitute/);
+    assert.ok(text.includes('env_vars = ["SITESHOT_API_KEY"]'), "gives the Codex fix");
+    assert.match(text, /https:\/\/www\.site-shot\.com\/start\//);
+  }
+  // A real key that merely contains a dollar sign or braces is still sent.
+  let fetched = 0;
+  const fetchImpl = async () => {
+    fetched++;
+    return fakeImageResponse(PNG);
+  };
+  for (const key of ["abc$def", "a1b2c3d4-e5f6"]) {
+    await captureScreenshot({ url: "https://example.com" }, { apiKey: key, fetchImpl });
+  }
+  assert.equal(fetched, 2, "keys that are not placeholders reach the API");
+  passed++;
+}
+
+console.log(`ok — ${passed}/25 smoke checks passed`);

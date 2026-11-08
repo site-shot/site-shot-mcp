@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createServer } from "./server.js";
+import { createServer, placeholderKeyMessage } from "./server.js";
 
 async function main() {
   if (!process.env.SITESHOT_API_KEY) {
@@ -11,6 +11,9 @@ async function main() {
         "Get a key at https://www.site-shot.com/start/ and add it to the server's env.\n",
     );
   }
+
+  const placeholder = placeholderKeyMessage(process.env.SITESHOT_API_KEY);
+  if (placeholder) process.stderr.write(`[site-shot-mcp] Warning: ${placeholder}\n`);
 
   const server = createServer();
   const transport = new StdioServerTransport();
