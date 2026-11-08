@@ -251,6 +251,23 @@ test("the Codex interface metadata is complete and claims nothing extra", () => 
     assert.ok(prompt.length <= 128, `starter prompt stays within 128 chars: "${prompt}"`);
   }
 
+  // A starter prompt runs as typed in a fresh session: it names its own URL, and asks only for what
+  // every plan can do. "Show me how this page renders from Germany" had neither: no page, and a
+  // country the free plan refuses while still counting the capture.
+  for (const prompt of ui.defaultPrompt) {
+    assert.doesNotMatch(prompt, /\bthis page\b/i, `starter prompt names its page: "${prompt}"`);
+    assert.doesNotMatch(prompt, /\bfrom (?!the US\b)[A-Z]/, `no country beyond the free plan's: "${prompt}"`);
+  }
+
+  // Store-facing assets and policies, as Codex 0.147 reads them: https URLs, ./assets/ paths.
+  for (const field of ["privacyPolicyURL", "termsOfServiceURL"]) {
+    assert.match(ui[field] ?? "", /^https:\/\/www\.site-shot\.com\/[a-z-]+\/$/, `interface.${field} is a site URL`);
+  }
+  for (const field of ["logo", "composerIcon"]) {
+    assert.match(ui[field] ?? "", /^\.\/assets\/[a-z-]+\.png$/, `interface.${field} is a ./assets/ PNG`);
+    assert.ok(statSync(join(repoRoot, pluginDir, ui[field])).isFile(), `interface.${field} exists in the plugin`);
+  }
+
   const copy = JSON.stringify(ui);
   assert.doesNotMatch(copy, /\bdirector(?:y|ies)\b|\bcatalog\b/i, "no claim of a directory listing");
   assert.doesNotMatch(copy, /\bguarantee/i, "no guarantee");
@@ -299,13 +316,10 @@ test("the plugin asks Claude Code for the key as required sensitive config", () 
   assert.match(cfg.description, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
   assert.doesNotMatch(cfg.description, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
 
-  // Where to find an existing key: /start/ shows a signed-in user's key already filled in,
-  // and the dashboard manages keys. Either works; /pricing/ alone sells plans and shows no key.
-  assert.match(
-    cfg.description,
-    /https:\/\/www\.site-shot\.com\/(?:start|dashboard)\//,
-    "the key link is /start/ or the dashboard",
-  );
+  // Where to find the key: /start/ shows a signed-in user's key and offers sign-up otherwise.
+  // /dashboard/ redirects a signed-out newcomer to the login page; /pricing/ sells plans only.
+  assert.match(cfg.description, /https:\/\/www\.site-shot\.com\/start\//, "the key link is /start/");
+  assert.doesNotMatch(cfg.description, /\/dashboard\//, "not the dashboard, a login redirect for newcomers");
 
   // A default would be a key someone shipped, and a fallback would quietly capture
   // against the wrong account rather than stopping.
@@ -363,9 +377,10 @@ test("the plugin ships only the files it declares — no hooks, no executables",
       `${pluginDir}/.claude-plugin/plugin.json`,
       `${pluginDir}/.codex-plugin/plugin.json`,
       `${pluginDir}/.mcp.json`,
+      `${pluginDir}/assets/logo.png`,
       `${pluginDir}/skills/website-screenshots/SKILL.md`,
     ],
-    "plugin contents are exactly one manifest and MCP config per host, plus one shared skill",
+    "plugin contents are exactly one manifest and MCP config per host, one shared skill and the Codex logo",
   );
 
   // Hooks, bin/ and monitors run code on the user's machine on Claude Code's schedule
@@ -536,6 +551,37 @@ test("the skill states what the key needs and claims nothing it cannot do", () =
   assert.doesNotMatch(skill, /\balways (?:use|choose|prefer|call)\b/i, "no always-choose-our-tool rule");
   assert.doesNotMatch(skill, /\bautomatic(?:ally)? retr|\bretry (?:ladder|loop)\b/i, "no automated retries");
   assert.match(skill, /\bre-?captur/i, "addresses re-capturing explicitly");
+});
+
+test("the skill says what the image really shows, where it goes, and what a failure means", () => {
+  const skill = read(`${pluginDir}/skills/website-screenshots/SKILL.md`);
+
+  // Ads and cookie banners are removed by default and the API may reuse cookies from earlier
+  // captures (fresh_session is never sent), so the capture is not "what a first-time visitor sees".
+  assert.doesNotMatch(skill, /\bfresh\b|first-time visitor/i, "no fresh-browser, first-visit claim");
+  assert.match(skill, /`block_ads`[^\n]*`block_cookie_banners`[^.]*on by default/, "both removals named as defaults");
+  assert.match(skill, /pass `false`/, "says how to keep banners or ads in the image");
+  assert.match(skill, /reuse cookies/i, "says earlier captures' cookies may be reused");
+
+  // Nothing is saved: the tools return the image into the conversation only.
+  assert.doesNotMatch(skill, /\barchiv(?:e|ing)\b(?![^.]*\brather than\b)|a record of what a page showed/i, "no archive promise");
+  assert.match(skill, /does not save it as a file/, "says the image is not saved");
+
+  // A failed call carries its status; the skill maps each common one to the person's next step.
+  const from = skill.indexOf("## When a capture fails");
+  assert.ok(from > -1, "the skill has a \"When a capture fails\" section");
+  const fails = skill.slice(from, skill.indexOf("\n## ", from + 1));
+  assert.match(fails, /HTTP 401[\s\S]*\/plugin configure site-shot@site-shot[\s\S]*SITESHOT_API_KEY[\s\S]*https:\/\/www\.site-shot\.com\/start\//);
+  assert.match(fails, /HTTP 403[\s\S]*https:\/\/www\.site-shot\.com\/start\/[\s\S]*https:\/\/www\.site-shot\.com\/pricing\//);
+  assert.match(fails, /HTTP 429/);
+  assert.match(fails, /placeholder/);
+  assert.match(fails, /error card[\s\S]*reason/);
+
+  // One skill ships to hosts with and without the Claude Code plugin, so its setup names both.
+  assert.match(skill, /Tessl/, "a Tessl install is covered");
+  assert.ok(skill.includes('env_vars = ["SITESHOT_API_KEY"]'), "the Codex pass-through is spelled out");
+  assert.match(skill, /https:\/\/github\.com\/site-shot\/site-shot-mcp#codex-cli-plugin/, "links the setup, not \"the README\"");
+  assert.doesNotMatch(skill, /\bthe README\b/, "no reference to a README the reader may not have");
 });
 
 test("the skill permits a requested comparison, not unsolicited repeats", () => {

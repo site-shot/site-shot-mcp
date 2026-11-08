@@ -27,10 +27,14 @@
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Read"],
     "websiteURL": "https://www.site-shot.com/",
+    "privacyPolicyURL": "https://www.site-shot.com/privacy-policy/",
+    "termsOfServiceURL": "https://www.site-shot.com/terms-of-use/",
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png",
     "defaultPrompt": [
       "Take a full-page screenshot of example.com.",
-      "Show me how this page renders from Germany.",
-      "Compare this page at mobile and desktop widths."
+      "Show me example.com at a 390 px mobile width.",
+      "Compare example.com at mobile and desktop widths."
     ]
   }
 }

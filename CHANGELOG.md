@@ -59,6 +59,21 @@
   says removal does not by itself lower that cost; the claim now reads "cleaner image for the model
   to read". The MCPB listing also says "public web pages" instead of "any web page".
 
+- The `website-screenshots` skill (Claude Code and Codex plugins) no longer says a capture is "a
+  fresh, signed-out browser" that "sees what a first-time visitor sees": ads and cookie banners are
+  removed by default, and a capture may reuse cookies that earlier captures saved. It now says so,
+  and says to pass `block_ads` / `block_cookie_banners` `false` when the question is about ads or
+  consent. It no longer offers to "archive" a page: the image is not saved anywhere, and the skill
+  says to tell the person that. A new "When a capture fails" section maps 401, a placeholder key,
+  403, 429 and a 404 error card to the person's next step. The setup paragraph covers installs
+  without the Claude Code plugin (Codex, Tessl, hand-written configs) and links the setup steps.
+- The Claude Code key prompt links https://www.site-shot.com/start/ instead of the dashboard, which
+  sends a signed-out newcomer to the login page.
+- Codex plugin: the starter prompt "Show me how this page renders from Germany." is replaced by
+  "Show me example.com at a 390 px mobile width." (the free plan refuses Germany and still counts
+  the capture), and every prompt names its URL. The listing gains the Site-Shot logo and the
+  privacy policy and terms URLs.
+
 ### Tests
 
 - Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and
