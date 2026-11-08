@@ -204,6 +204,11 @@ as `Connected` once it starts.
 Works the same way in any MCP client (Cursor, Cline, VS Code, LangChain, CrewAI) — point the client at
 `npx -y site-shot-mcp` with `SITESHOT_API_KEY` in the environment.
 
+Already running the server in one of those clients? `npx skills add site-shot/site-shot-mcp` adds the
+`website-screenshots` skill, which tells the agent when to reach for the two tools and how to read
+their errors. The skill needs the server: on its own it can only tell the agent that setup is
+incomplete.
+
 Every integration above runs the same local stdio server, published on npm and in the official MCP Registry. Hosted HTTPS MCP is a separate deployment and client-compatibility path, not something these plugin install commands configure. Publication here does not imply listing in the shared ChatGPT/Codex public plugin directory or Claude's remote connector directory.
 
 ## Tools
