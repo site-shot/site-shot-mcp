@@ -382,8 +382,8 @@ export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeo
     // empty 404), so the plan has to be named here or the agent never learns it.
     if (countryCode !== "US") {
       text +=
-        ` Country "${countryCode}": the free plan allows only the default location or the US, so a ` +
-        `free-plan key is refused here; other countries need a paid plan ` +
+        ` If this key is on the free plan, that alone explains it: the free plan allows only the ` +
+        `default location or the US, "${countryCode}" needs a paid plan ` +
         `(https://www.site-shot.com/pricing/), and strict_country: false does not lift that.`;
     }
     // One possible cause, not the cause: a DNS failure is a 404 card too, so this is conditional
