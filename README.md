@@ -6,24 +6,31 @@ with [Site-Shot](https://www.site-shot.com/) over the [Model Context Protocol](h
 Real Chromium rendering · full-page capture · country proxies · automatic **ad & cookie-banner removal**
 (cleaner images for the model to read).
 
-A Site-Shot API key is required. A confirmed account's API key comes with the free plan: 100 API
-captures a month, no card needed; paid plans start at $5/mo for 2,000. The free plan renews every
-month; once its 100 captures are spent, the API answers 403 until it renews. Free-plan captures
-come from the default location or the US; other countries need a paid plan, and a request for one
-is refused but still counts toward the month. Accounts confirmed before 2026-10-30 switch the free
-plan on with one button on <https://www.site-shot.com/start/>; an account that has had a paid plan
-before does not get it. Captures draw on that account's API allowance and limits.
-Get the key at <https://www.site-shot.com/start/> or from your
-[Site-Shot dashboard](https://www.site-shot.com/dashboard/); [pricing](https://www.site-shot.com/pricing/)
-lists the plans. The no-signup browser tool at <https://www.site-shot.com/> is for checking output
-quality; it does not issue keys.
+## Quick start
+
+1. **Get an API key** at <https://www.site-shot.com/start/>. A confirmed account's key comes with the
+   free plan: 100 API captures a month, no card needed.
+2. **Add the server to your agent** — pick your client below:
+   [Claude Code](#claude-code-plugin) · [Codex CLI](#codex-cli-plugin) ·
+   [Claude Desktop, Cursor and other clients](#claude-desktop--other-mcp-clients).
+3. **Ask:** *"Take a screenshot of example.com."* The agent calls the server and shows you the image.
+
+### About the key
+
+The free plan renews every month; once its 100 captures are spent, the API answers 403 until it
+renews. Free-plan captures come from the default location or the US; other countries need a paid
+plan, and a request for one is refused but still counts toward the month. Paid plans start at $5/mo
+for 2,000 captures ([pricing](https://www.site-shot.com/pricing/)). Accounts confirmed before
+2026-10-30 switch the free plan on with one button on <https://www.site-shot.com/start/>; an account
+that has had a paid plan before does not get it. Captures draw on that account's API allowance and
+limits. The no-signup browser tool at <https://www.site-shot.com/> is for checking output quality;
+it does not issue keys.
 
 ## Claude Code (plugin)
 
-This repository doubles as a Claude Code plugin marketplace. The plugin runs the published
-`site-shot-mcp` package over stdio and declares the API key as a required sensitive setting, so
-Claude Code prompts you for it rather than asking you to paste it into this repository, a config
-file, or a chat message.
+This repository is a Claude Code plugin marketplace. The plugin runs the published `site-shot-mcp`
+package over stdio and declares the API key as a required sensitive setting, which Claude Code
+collects in a masked prompt rather than asking you to paste it into a config file or a chat message.
 
 ### Install
 
@@ -32,66 +39,46 @@ claude plugin marketplace add site-shot/site-shot-mcp
 claude plugin install site-shot@site-shot
 ```
 
-or from inside a session:
-
-```
-/plugin marketplace add site-shot/site-shot-mcp
-/plugin install site-shot@site-shot
-```
-
-Both forms resolve the marketplace from GitHub, so they work only after these manifests are
-published on the repository's public default branch — not from a local branch or a fork you
-have not pushed.
-
-### Try it before that
-
-Load the plugin directory for a single session:
-
-```bash
-claude --plugin-dir /absolute/path/to/site-shot-mcp/plugins/site-shot
-```
-
-Two things matter here. Pass an **absolute** path — `--plugin-dir` is resolved against the session's
-working directory. And start that session from an ordinary project directory, **not from this
-checkout**: this repo *is* the `site-shot-mcp` package, so npm resolves the name locally, finds no
-linked binary, and the server dies with `sh: site-shot-mcp: command not found` before Claude Code
-ever sees it. From an unrelated directory `npx` fetches the published package and starts it
-normally — checked both ways: exit 127 in this checkout, clean stdio start from an empty one.
-
-To exercise the real install path instead — marketplace resolution, manifests and the required
-setting — add the checkout itself as a marketplace:
-
-```bash
-claude plugin marketplace add /absolute/path/to/site-shot-mcp
-claude plugin install site-shot@site-shot
-```
-
-That installs into your user scope; undo it with `claude plugin uninstall site-shot@site-shot` and
-`claude plugin marketplace remove site-shot`.
-
-### The API key
-
-The plugin declares `SITESHOT_API_KEY` as a required, sensitive setting. Claude Code prompts you for
-the key, masks it as you type, and substitutes it into the server's environment as
-`${user_config.SITESHOT_API_KEY}`. Storage of the value is Claude Code's to handle.
-
-Installing without one is not an error — Claude Code records it as still owed
-(`1 userConfig option not yet set (1 required)`). Supply it through the masked prompt:
+Then, in a Claude Code session, enter the key:
 
 ```
 /plugin configure site-shot@site-shot
 ```
 
-Configure it before expecting a capture: that setting is what feeds the server its key. What Claude
-Code does while it is unset — whether the server is launched at all, whether the tools are offered —
-is Claude Code's own behaviour and is not something documented here from observation.
+From inside a session the first two steps are `/plugin marketplace add site-shot/site-shot-mcp` and
+`/plugin install site-shot@site-shot`.
 
-The server's side is independent of that. When run directly over stdio **without a key**, it still
-starts and prints a warning on stderr. Capture tools return a clear missing-key error instead of an image.
+### The API key
+
+The plugin declares `SITESHOT_API_KEY` as a required, sensitive setting. `/plugin configure` asks
+for it, masks it as you type, and Claude Code substitutes it into the server's environment as
+`${user_config.SITESHOT_API_KEY}`. Storage of the value is Claude Code's to handle.
+
+Installing from the command line does not ask for the key: the install prints
+`1 userConfig option not yet set (1 required)` and names `/plugin configure`. Configure it before
+expecting a capture. Until the key is set, Claude Code does not list the server (`claude mcp list`
+shows no site-shot entry) and the capture tools do not appear (observed with Claude Code 2.1.283).
+Run `/plugin configure site-shot@site-shot` again to replace a wrong key.
+
+The server's own behaviour is separate. When run directly over stdio **without a key**, it still
+starts and prints a warning on stderr, and the capture tools return a clear missing-key error
+instead of an image.
 
 The plugin adds one skill (`site-shot:website-screenshots`) and the two capture tools
 [below](#tools). It declares no hooks, no monitors and no scheduled capture jobs; the only process
 it launches is the declared stdio MCP server.
+
+### Updating
+
+The plugin pins an exact `site-shot-mcp` release (now `site-shot-mcp@1.2.1`), so a new server
+version reaches you through a plugin update:
+
+```bash
+claude plugin marketplace update site-shot
+claude plugin update site-shot@site-shot
+```
+
+Restart Claude Code afterwards.
 
 ## Codex CLI (plugin)
 
@@ -106,13 +93,9 @@ codex plugin marketplace add site-shot/site-shot-mcp
 codex plugin add site-shot@site-shot
 ```
 
-Exercised against Codex CLI 0.147.0 on macOS (arm64). As with Claude Code, these resolve the
-marketplace from GitHub, so they work only once these manifests are on the public default branch;
-before that, point `codex plugin marketplace add` at a local checkout path instead.
-
-Installing is not the same as being configured, and neither is the same as a capture succeeding.
-Installation only puts the manifests in place. The server still needs the key below, and a capture
-still needs allowance left on that key's account, from the free plan or a paid plan.
+Exercised against Codex CLI 0.147.0 on macOS (arm64). Installing is not the same as being
+configured, and neither is the same as a capture succeeding: the server still needs the key below,
+and a capture still needs allowance left on that key's account, from the free plan or a paid plan.
 
 ### The API key
 
@@ -122,23 +105,49 @@ Codex forwards the variable named in the plugin's descriptor:
 { "command": "npx", "args": ["-y", "site-shot-mcp@1.2.1"], "env_vars": ["SITESHOT_API_KEY"] }
 ```
 
-`env_vars` is an allow-list of names, not values: no key appears in this descriptor, in the command
+`env_vars` is an allow-list of names, not values: no key appears in this descriptor, in the commands
 below, or in the manual `config.toml` entry further down. You provision the key in the environment
-of the session you start Codex from.
+Codex starts from, in one of two ways.
 
-macOS defaults to zsh, where `read -p` starts a coprocess rather than printing a prompt — and a
-`bash`-labelled code fence does not change the shell you paste into. Invoke bash explicitly:
+**For one session (most private).** macOS defaults to zsh, where `read -p` starts a coprocess rather
+than printing a prompt, so invoke bash explicitly:
 
 ```bash
 bash -c 'read -r -s -p "Site-Shot API key: " SITESHOT_API_KEY && printf "\n" && export SITESHOT_API_KEY && exec codex'
 ```
 
 `-s` keeps the key off the screen, nothing here puts it in argv, and the export is scoped to that
-child session instead of lingering in the shell you typed from.
+child session instead of lingering in the shell you typed from. You type the key at each launch.
 
-What this does not do is configure a Codex you start some other way. A desktop launcher or a remote
-session begins from its own environment, so it will run the server without a key until you provision
-one there too.
+**For every session.** Keep the key in a file only you can read, and export it from your shell
+profile (`~/.zshrc` or `~/.bashrc`):
+
+```bash
+mkdir -p ~/.config/site-shot && chmod 700 ~/.config/site-shot
+# put the key in ~/.config/site-shot/api-key with your editor, then:
+chmod 600 ~/.config/site-shot/api-key
+```
+
+```bash
+# in ~/.zshrc or ~/.bashrc
+export SITESHOT_API_KEY="$(cat ~/.config/site-shot/api-key)"
+```
+
+The trade-off: every program started from those shells can read the variable. A Codex started from
+a desktop launcher or a remote session does not read your shell profile, so it runs the server
+without a key; start Codex from a terminal instead. If the key ever arrives as the literal text
+`${SITESHOT_API_KEY}`, the server says so: that is an `env` table Codex did not expand, and
+`env_vars` is the fix.
+
+### Updating
+
+```bash
+codex plugin marketplace upgrade site-shot
+codex plugin add site-shot@site-shot
+```
+
+The first command refreshes the marketplace from GitHub; the second installs the plugin version it
+now lists (the plugin pins an exact `site-shot-mcp` release).
 
 ### Manual MCP setup instead
 
@@ -159,14 +168,11 @@ Check it with `codex mcp get site-shot`. If you already have an entry like this 
 plugin, remove the manual one deliberately with `codex mcp remove site-shot` — nothing here edits
 your configuration for you.
 
-Either route, the caveat from the Claude Code section applies: unless the entry sets `cwd`, Codex
-starts the server from wherever you ran Codex, so running it inside this repo hits the same
-local-name collision.
-
 ## Claude Desktop & other MCP clients
 
 1. Get a Site-Shot API key at <https://www.site-shot.com/start/>.
-2. Add this to your Claude Desktop config (`claude_desktop_config.json`):
+2. Add this to your Claude Desktop config (`claude_desktop_config.json`), with your key in place of
+   `YOUR_API_KEY`:
 
 ```json
 {
@@ -214,16 +220,22 @@ Returns the screenshot as an MCP image.
 
 > **"API default" is not a number this package gets to state.** `width`, `height` and `wait_ms`
 > are forwarded only when you pass them, so whatever applies when you don't is decided by the
-> Site-Shot API and can change without a release here. Versions up to 1.1.0 printed pixel sizes
-> for `width` / `height` that the API does not use — an agent that omitted them to take "the
-> default" got a different viewport, with nothing in the returned image to reveal it. Pass
-> explicit values whenever the size matters.
+> Site-Shot API and can change without a release here. Pass explicit values whenever the size
+> matters.
 
 > **Country codes are ISO codes, never names.** Pass `"DE"`, not `"Germany"`. The API matches
 > codes exactly and would otherwise render through a US proxy without telling you, so the server
 > rejects full names before spending a render. `strict_country` (on by default) likewise turns an
 > unavailable country into an error instead of a silent US screenshot — pass `false` to opt back
 > into the fallback. [Supported countries →](https://www.site-shot.com/countries)
+
+An argument the tools do not take is refused before any capture, with the name to use: the
+Site-Shot API's own names such as `delay_time`, `full_size` or `no_ads` map to `wait_ms`,
+`full_page` and `block_ads` here.
+
+Every failure starts with the HTTP status and says what to do next (for example, a 401 points to
+where the key is set). When the API answers with an error card instead of a screenshot, the card is
+attached as an image, because it names the reason.
 
 ### `capture_full_page`
 Same as `capture_screenshot` with full-page capture enabled.
@@ -254,17 +266,10 @@ vision tokens per look. The full comparison, both directions honestly argued:
 The server is a thin wrapper over the existing Site-Shot HTTP API (`https://api.site-shot.com/`) — no
 separate backend.
 
-## Local development
+## Development
 
-```bash
-npm install
-npm run check            # syntax check
-npm run smoke            # offline tests (stubbed fetch, no API key needed)
-node test/integration.mjs  # real stdio handshake against the local source
-npm run test:plugin      # plugin/marketplace metadata tests
-npm run validate:plugin  # claude plugin validate --strict (needs the claude CLI)
-SITESHOT_API_KEY=yourkey npm start   # run the server on stdio
-```
+Running the tests, trying the plugin from a checkout, and the release steps are in
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Requirements
 

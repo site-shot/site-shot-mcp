@@ -74,6 +74,15 @@
   the capture), and every prompt names its URL. The listing gains the Site-Shot logo and the
   privacy policy and terms URLs.
 
+- README: a three-step quick start comes first (key at https://www.site-shot.com/start/, the
+  client snippet, a first prompt). The Claude Code install block now ends with
+  `/plugin configure site-shot@site-shot`, and the README states the observed behaviour instead of
+  a hedge: a command-line install does not ask for the key, and until it is set Claude Code lists
+  no server and offers no tools. Stale "works only once published" caveats are gone (both
+  marketplaces install from GitHub). New "Updating" steps for Claude Code and Codex, and a
+  persistent key option for Codex next to the one-shot prompt. The dashboard link is replaced by
+  /start/. Checkout testing and release steps moved to DEVELOPMENT.md.
+
 ### Added
 
 - `plugins/site-shot-tessl/`: the Tessl Registry plugin (the shared `website-screenshots` skill plus

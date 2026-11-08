@@ -29,6 +29,7 @@ const pluginDir = String(entry?.source ?? "").replace(/^\.\//, "");
 const plugin = readJson(pluginDir, ".claude-plugin", "plugin.json");
 const mcp = readJson(pluginDir, ".mcp.json");
 const readme = read("README.md");
+const development = read("DEVELOPMENT.md");
 
 // Codex installs the same plugin directory through its own marketplace and its own
 // manifest. The two hosts share everything except credential wiring: Claude Code
@@ -686,21 +687,22 @@ test("README commands match the manifests they document", () => {
   // --plugin-dir resolves against the session's cwd, and the one cwd that cannot work is
   // this repo: it *is* the site-shot-mcp package, so npx resolves the name locally, finds
   // no linked bin, and the server exits 127 with "command not found" before the handshake.
-  const pluginDirArg = /claude --plugin-dir (\S+)/.exec(readme)?.[1];
-  assert.ok(pluginDirArg, "README shows how to test the plugin before publication");
+  // That is maintainer material, so it lives in DEVELOPMENT.md, not in the user README.
+  const pluginDirArg = /claude --plugin-dir (\S+)/.exec(development)?.[1];
+  assert.ok(pluginDirArg, "DEVELOPMENT.md shows how to test the plugin from a checkout");
   assert.ok(pluginDirArg.startsWith("/"), `--plugin-dir example must be absolute, got "${pluginDirArg}"`);
   assert.ok(
     readme.includes(`site-shot-mcp@${pkg.version}`),
     "README quotes the same pinned version the plugin runs",
   );
 
-  // The marketplace commands only resolve once these manifests are on the public
-  // default branch. Printing them without that caveat reads as "already published".
-  const marketplaceSection = readme.slice(readme.indexOf("claude plugin marketplace add"));
-  assert.match(
-    marketplaceSection.slice(0, 1200),
-    /\b(?:after|once)\b[^.]*\b(?:published|public|default branch|merged)\b/i,
-    "README says the marketplace commands need the manifests published first",
+  // The manifests have been on the public default branch since b586a9a, and both installs were
+  // exercised from GitHub (Claude Code 2.1.283, Codex 0.147.0). A "works only once published"
+  // caveat now makes a two-command install look unfinished.
+  assert.doesNotMatch(
+    readme,
+    /\bonly\s+(?:after|once)\b[^.]*\b(?:published|public default branch)\b|Try it before that/i,
+    "no stale pre-publication caveat in the user README",
   );
 
   assert.ok(readme.includes("[mcp_servers.site-shot]"), "README documents the Codex TOML table");
@@ -711,26 +713,30 @@ test("README commands match the manifests they document", () => {
 
   // Claude Code collects the key itself through required sensitive userConfig. Telling
   // users to export it anyway would send a credential somewhere nothing reads it from.
+  // A command-line install does not ask for it (observed, Claude Code 2.1.283): the masked prompt
+  // is /plugin configure, so the install block has to include that step.
   const claudeCodeSection = section("## Claude Code");
-  assert.match(
-    claudeCodeSection,
-    /prompts you for\s+(?:it|the key|your [^.]{0,40}key)\b/i,
-    "README says Claude Code prompts for the key",
+  assert.match(claudeCodeSection, /masked prompt/i, "README says Claude Code collects the key in a masked prompt");
+  const install = claudeCodeSection.slice(claudeCodeSection.indexOf("### Install"), claudeCodeSection.indexOf("### The API key"));
+  assert.ok(
+    install.includes(`/plugin configure ${entry.name}@${marketplace.name}`),
+    "the install steps end with entering the key",
   );
+  assert.doesNotMatch(claudeCodeSection, /prompts you for/i, "no claim that the install itself prompts");
   assert.doesNotMatch(
     claudeCodeSection,
     /export SITESHOT_API_KEY|"SITESHOT_API_KEY":\s*"YOUR/i,
     "the Claude Code path never asks the user to paste or export the key",
   );
   assert.match(
-    claudeCodeSection,
+    development,
     /\bnot from this\s+checkout\b/i,
     "local testing warns against running from the MCP source checkout",
   );
   assert.match(
-    claudeCodeSection,
+    development,
     /command not found/,
-    "README names the observed failure so it is recognisable when hit",
+    "DEVELOPMENT.md names the observed failure so it is recognisable when hit",
   );
 
   // Where Claude Code puts a sensitive value is its business and varies by platform.
@@ -751,6 +757,30 @@ test("README commands match the manifests they document", () => {
   assert.match(readme, /claude_desktop_config\.json/, "Claude Desktop setup is preserved");
 });
 
+test("README starts users at /start/, with a quick start and update steps", () => {
+  // The first thing in the README is how to start: key, client, first prompt.
+  const quick = readme.indexOf("## Quick start");
+  assert.ok(quick > -1 && quick < readme.indexOf("## Claude Code"), "a quick start comes before the per-client sections");
+  assert.match(section("## Quick start"), /https:\/\/www\.site-shot\.com\/start\//, "the quick start links /start/ for the key");
+  assert.match(section("## Quick start"), /example\.com/, "and gives a first prompt");
+  // /dashboard/ is a login redirect for a signed-out newcomer.
+  assert.doesNotMatch(readme, /site-shot\.com\/dashboard\//, "keys are found at /start/, not the dashboard");
+
+  // Plugin users are pinned to one release; an update is how a fix reaches them.
+  assert.ok(section("## Claude Code").includes("claude plugin marketplace update site-shot"), "Claude Code update: marketplace");
+  assert.ok(section("## Claude Code").includes(`claude plugin update ${entry.name}@${marketplace.name}`), "Claude Code update: plugin");
+  assert.ok(section("## Codex CLI").includes("codex plugin marketplace upgrade site-shot"), "Codex update: marketplace");
+
+  // The skill links this anchor for Codex setup: keep the heading that produces it.
+  assert.match(readme, /^## Codex CLI \(plugin\)$/m, "the #codex-cli-plugin anchor the skill links exists");
+
+  // A persistent key option next to the one-shot prompt, without a key on a command line.
+  const codex = section("## Codex CLI");
+  assert.match(codex, /For every session/, "a persistent option is offered");
+  assert.match(codex, /chmod 600/, "the key file is private");
+  assert.match(codex, /trade-off/i, "and its trade-off is named");
+});
+
 test("README describes what the plugin runs, and what a missing key really does", () => {
   const claudeCodeSection = section("## Claude Code");
 
@@ -762,15 +792,14 @@ test("README describes what the plugin runs, and what a missing key really does"
   assert.match(claudeCodeSection, /scheduled[^.]*\bjobs?\b/i, "scheduled capture jobs named");
   assert.match(claudeCodeSection, /stdio MCP server/i, "names the one process the plugin does launch");
 
-  // Two separate layers, and only one of them has been exercised. The isolated
-  // install/list run never started a model session, so whether Claude Code launches the
-  // server or offers the tools with a required setting unset is simply unknown here.
-  // The missing-key tool error is a fact about the stdio server, observed directly;
-  // carrying it over to the plugin path would be inventing the untested half.
-  assert.doesNotMatch(
-    readme,
-    /\b(?:server|plugin)[^.]{0,40}(?:will not|won't|refuses to|does not) start\b/i,
-    "no invented startup guarantee",
+  // Two separate layers. With the required setting unset, Claude Code does not list the server
+  // and offers no tools (observed by two audits with an isolated CLAUDE_CONFIG_DIR, Claude Code
+  // 2.1.283: `claude mcp list` -> "No MCP servers configured"). The missing-key tool error is a
+  // fact about the stdio server, observed directly; it is not carried over to the plugin path.
+  assert.match(
+    section("## Claude Code"),
+    /Until the key is set[^.]*does not list the server[^.]*tools do not appear[^.]*observed with Claude Code \d/,
+    "README states the observed unset-key behaviour, with the version it was observed on",
   );
   assert.doesNotMatch(
     readme,
