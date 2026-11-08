@@ -74,6 +74,16 @@
   the capture), and every prompt names its URL. The listing gains the Site-Shot logo and the
   privacy policy and terms URLs.
 
+### Added
+
+- `plugins/site-shot-tessl/`: the Tessl Registry plugin (the shared `website-screenshots` skill plus
+  the pinned `site-shot-mcp` server), moved into this repo from a hand copy kept elsewhere.
+  `npm run sync:tessl` regenerates its skill, license, version and pin from this repo, and
+  `npm run test:plugin` fails when they drift. Tessl does not support `env_vars`, so the server
+  entry keeps `"SITESHOT_API_KEY": "${SITESHOT_API_KEY}"`: Claude Code expands it, Codex does not;
+  the listing description says what to change for Codex, and the server now names the placeholder
+  when it arrives unexpanded. Not published; `"private": true` until the owner publishes it.
+
 ### Tests
 
 - Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and

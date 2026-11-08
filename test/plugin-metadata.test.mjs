@@ -410,6 +410,56 @@ test("the plugin ships only the files it declares — no hooks, no executables",
   assert.deepEqual(pkg.files, ["src", "README.md", "CHANGELOG.md", "LICENSE"], "npm files whitelist unchanged");
 });
 
+// The Tessl Registry packages a directory, so its plugin carries copies: the shared skill, the
+// LICENSE, and the release pin. They are derived by `npm run sync:tessl`; this test is what stops
+// a release from bumping or editing the Claude/Codex plugin and leaving the Tessl copy behind.
+test("the Tessl plugin ships the shared skill and the same pinned release", () => {
+  const tesslDir = "plugins/site-shot-tessl";
+  const fix = "run `npm run sync:tessl`";
+  assert.deepEqual(
+    filesUnder(tesslDir),
+    [
+      `${tesslDir}/.mcp.json`,
+      `${tesslDir}/.tessl-plugin/plugin.json`,
+      `${tesslDir}/LICENSE`,
+      `${tesslDir}/skills/website-screenshots/SKILL.md`,
+    ],
+    "a Tessl manifest, its MCP config, the license and the shared skill, nothing else",
+  );
+  assert.equal(
+    read(tesslDir, "skills", "website-screenshots", "SKILL.md"),
+    read(pluginDir, "skills", "website-screenshots", "SKILL.md"),
+    `the Tessl skill is the shared skill, byte for byte (${fix})`,
+  );
+  assert.equal(read(tesslDir, "LICENSE"), read("LICENSE"), `the Tessl LICENSE is the repo's (${fix})`);
+
+  const manifest = readJson(tesslDir, ".tessl-plugin", "plugin.json");
+  assert.equal(manifest.name, "site-shot/website-screenshots");
+  assert.equal(manifest.version, pkg.version, `the Tessl version tracks the package (${fix})`);
+  assert.equal(manifest.skills, "./skills/");
+  assert.equal(manifest.mcpServers, ".mcp.json");
+  assert.equal(manifest.license, pkg.license);
+
+  const tesslMcp = readJson(tesslDir, ".mcp.json");
+  const server = assertPinnedRelease(tesslMcp, "tessl");
+  // Tessl ignores env_vars (tessl plugin lint 0.119.0: "ignored unsupported field(s) env_vars"), so
+  // the key goes in as a ${VAR} reference. Claude Code expands it; Codex does not, which is why the
+  // description says what to change and the server names an unexpanded placeholder.
+  assert.deepEqual(server.env, { SITESHOT_API_KEY: "${SITESHOT_API_KEY}" }, "the key is an environment reference");
+  assert.ok(manifest.description.includes('env_vars = ["SITESHOT_API_KEY"]'), "the listing gives the Codex fix");
+  assert.doesNotMatch(JSON.stringify(manifest), FREE_PLAN_OVERCLAIM);
+
+  // Not a third plugin in the Claude Code or Codex marketplaces.
+  for (const m of [marketplace, codexMarketplace]) {
+    assert.doesNotMatch(JSON.stringify(m), /site-shot-tessl/, "the marketplaces do not offer the Tessl copy");
+  }
+  for (const file of filesUnder(tesslDir)) {
+    for (const [, value] of read(file).matchAll(/SITESHOT_API_KEY["'\s:=]+([A-Za-z0-9_\-]{8,})/g)) {
+      assert.fail(`${file} looks like it embeds a key: ${value.slice(0, 12)}…`);
+    }
+  }
+});
+
 test("the skill only names tools and params the server actually serves", async () => {
   const skillPath = `${pluginDir}/skills/website-screenshots/SKILL.md`;
   const skill = read(skillPath);
