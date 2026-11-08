@@ -46,6 +46,12 @@
   Site-Shot's side and count toward the month, and a network error no longer echoes text that
   could quote the request URL with the key in it.
 
+- An argument a tool does not take is refused before any capture, with the name to use:
+  `delay_time` -> `wait_ms`, `full_size` -> `full_page`, `no_ads` -> `block_ads`,
+  `no_cookie_popup` -> `block_cookie_banners`. The schema used to drop unknown keys silently, so a
+  call with the Site-Shot API's own names ran, and counted, as a capture without the wait or the
+  full page that was asked for.
+
 ### Tests
 
 - Smoke checks 20–22 replay the measured shapes: a 404 card with no Content-Type (with and
@@ -53,7 +59,7 @@
   message. Check 19 no longer fakes the geo refusal as a text 403, a shape image mode never sends;
   check 26 replays the two real ones, and check 27 covers 401 and 429. Checks 23-25 cover tiles
   and placeholder keys; check 28 a body that stalls after the headers, check 29 a cancelled call
-  over a real MCP session.
+  over a real MCP session, check 30 arguments the tools do not take.
 
 ## 1.2.1 — 2026-10-31
 

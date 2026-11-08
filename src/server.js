@@ -103,7 +103,41 @@ function imageMime(buf) {
   return "image/png";
 }
 
+// The Site-Shot API's own parameter names, which agents carry over from the API docs and SDKs. The
+// tool schema used to strip any key it did not know, so { delay_time: 5000 } ran, and counted, as a
+// capture with no wait at all.
+const API_PARAM_HINTS = {
+  delay_time: "use wait_ms",
+  full_size: "use full_page: true, or the capture_full_page tool",
+  no_ads: "use block_ads, on by default",
+  no_cookie_popup: "use block_cookie_banners, on by default",
+  userkey: "the key comes from the server's SITESHOT_API_KEY setting, never from an argument",
+  api_key: "the key comes from the server's SITESHOT_API_KEY setting, never from an argument",
+  key: "the key comes from the server's SITESHOT_API_KEY setting, never from an argument",
+  response_type: "this server always returns the image itself",
+};
+
+function unknownArgumentsError(args) {
+  const known = new Set([...Object.keys(baseInputShape), "full_page"]);
+  const unknown = Object.keys(args ?? {}).filter((k) => !known.has(k));
+  if (unknown.length === 0) return null;
+  const lines = unknown.map((k) => `"${k}"` + (API_PARAM_HINTS[k] ? ` (${API_PARAM_HINTS[k]})` : ""));
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text:
+          `Not captured: this tool does not take ${lines.join(", ")}. Its arguments are ` +
+          `${[...known].join(", ")}. Call it again with those; nothing was sent to Site-Shot.`,
+      },
+    ],
+  };
+}
+
 export async function captureScreenshot(args, { apiKey, fetchImpl, signal, timeoutMs = REQUEST_TIMEOUT_MS }) {
+  const unknown = unknownArgumentsError(args);
+  if (unknown) return unknown;
   const placeholder = placeholderKeyMessage(apiKey);
   if (placeholder) return { isError: true, content: [{ type: "text", text: placeholder }] };
   if (!apiKey) {
@@ -478,7 +512,10 @@ export function createServer(opts = {}) {
         "Take a screenshot of a web page with Site-Shot and return it as an image. Renders in a real " +
         "Chromium browser. Supports viewport/device sizing, full-page capture, country proxies, and " +
         "automatic ad & cookie-banner removal (cleaner image, fewer vision tokens).",
-      inputSchema: {
+      // passthrough, not the SDK's default strip: an unknown key has to reach the handler to be
+      // refused with a pointer to the right name, instead of vanishing from a capture that runs.
+      inputSchema: z
+        .object({
         ...baseInputShape,
         full_page: z
           .boolean()
@@ -487,7 +524,8 @@ export function createServer(opts = {}) {
             "Capture the entire scrollable page instead of just the viewport. Default: false. A PNG " +
               "taller than 2000 px comes back as several image tiles, top to bottom (still one capture).",
           ),
-      },
+        })
+        .passthrough(),
     },
     (args, extra) => captureScreenshot(args, { apiKey, fetchImpl, signal: extra?.signal }),
   );
@@ -501,7 +539,7 @@ export function createServer(opts = {}) {
         "it as an image. Convenience wrapper around capture_screenshot with full-page capture enabled. " +
         "A PNG taller than 2000 px comes back as several image tiles, top to bottom, so text stays " +
         "readable (still one capture); a tall jpeg or webp comes back whole and clients may scale it down.",
-      inputSchema: baseInputShape,
+      inputSchema: z.object(baseInputShape).passthrough(),
     },
     (args, extra) => captureScreenshot({ ...args, full_page: true }, { apiKey, fetchImpl, signal: extra?.signal }),
   );

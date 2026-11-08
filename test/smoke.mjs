@@ -572,4 +572,38 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); //
   passed++;
 }
 
-console.log(`ok — ${passed}/29 smoke checks passed`);
+// 30) An argument the tool does not take is refused before any capture, with the name to use.
+// The schema used to strip unknown keys, so the Site-Shot API's own names (delay_time, full_size,
+// no_ads), which agents carry over from the API docs, ran a capture without what was asked for.
+{
+  let fetched = false;
+  const fetchImpl = async () => {
+    fetched = true;
+    return fakeImageResponse(PNG);
+  };
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer({ apiKey: "K", fetchImpl });
+  const client = new Client({ name: "smoke", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  for (const name of ["capture_screenshot", "capture_full_page"]) {
+    const res = await client.callTool({
+      name,
+      arguments: { url: "example.com", delay_time: 5000, full_size: 1, no_ads: 0, made_up: true },
+    });
+    assert.equal(res.isError, true, `${name}: unknown arguments are an error`);
+    const text = res.content[0].text;
+    assert.match(text, /"delay_time" \(use wait_ms\)/);
+    assert.match(text, /"full_size" \(use full_page/);
+    assert.match(text, /"no_ads" \(use block_ads/);
+    assert.match(text, /"made_up"/);
+    assert.match(text, /nothing was sent to Site-Shot/);
+  }
+  assert.equal(fetched, false, "no capture was spent");
+  const ok = await client.callTool({ name: "capture_screenshot", arguments: { url: "example.com", wait_ms: 500 } });
+  assert.equal(ok.isError, undefined, "known arguments still capture");
+  assert.equal(fetched, true);
+  await client.close();
+  passed++;
+}
+
+console.log(`ok — ${passed}/30 smoke checks passed`);
