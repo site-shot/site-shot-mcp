@@ -938,6 +938,23 @@ test("no copy promises fewer vision tokens", async () => {
   }
 });
 
+// npm search does not stem and does not split hyphenated keywords: on 2026-11-09 this package
+// ranked outside the top 1500 for "screenshot mcp" and "screenshot api", although
+// "screenshot-api" was a keyword. The description is what the results list shows and what the
+// ranking reads first, so it opens with the task words; the spaced phrases are keywords too.
+test("the npm description and keywords carry the words people search for", () => {
+  assert.match(pkg.description, /^Website screenshot API\b/, "the description opens with the task words");
+  assert.match(pkg.description, /\bMCP server\b/, "and says what the package is");
+  assert.match(pkg.description, /\bcountry proxies on paid plans\b/, "country proxies are a paid-plan feature, not a free-plan one");
+  assert.doesNotMatch(pkg.description, /\bany (?:public )?web ?page\b/i, "no promise to capture any page whatsoever");
+  assert.doesNotMatch(pkg.description, /\bdevice emulation\b|\bcertified\b|\bimmutable\b|\bforensic\b/i, "no claim the product does not make");
+  assert.doesNotMatch(pkg.description, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial or a free tier");
+  for (const phrase of ["website screenshot", "screenshot api", "screenshot mcp"]) {
+    assert.ok(pkg.keywords.includes(phrase), `keywords include the spaced phrase "${phrase}"`);
+  }
+  assert.equal(new Set(pkg.keywords).size, pkg.keywords.length, "no duplicate keywords");
+});
+
 // The versions the tests above could not see. Everything they check is a file this
 // suite reads; `serverInfo.version` is a value the server states over the wire during
 // the handshake, and it is what a client -- or a directory reviewer -- actually sees.

@@ -1,12 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.2.3 — 2026-11-09
+
+The server code is unchanged from 1.2.2; only the version it reports in the MCP handshake moves.
+
+### Changed
+
+- The npm description now opens with "Website screenshot API for AI agents" and says country
+  proxies come with paid plans. The keywords add the spaced phrases "website screenshot",
+  "screenshot api", "screenshot mcp", "mcp server" and "full page screenshot": npm search does not
+  stem and does not match a hyphenated keyword such as `screenshot-api` against a spaced query,
+  so the package ranked outside the first 1,500 results for "screenshot mcp" and "screenshot api".
+- Every manifest and README snippet pins `site-shot-mcp@1.2.3`.
 
 ### Added
 
 - `gemini-extension.json` at the repository root: `gemini extensions install
   https://github.com/site-shot/site-shot-mcp` installs the pinned server and asks for the key as a
-  sensitive setting. Repository-only; the npm package is unchanged. Checked with gemini-cli 0.67.0.
+  sensitive setting. It lives in the repository; the npm package does not include it. Checked with
+  gemini-cli 0.67.0.
 
 ## 1.2.2 — 2026-11-08
 

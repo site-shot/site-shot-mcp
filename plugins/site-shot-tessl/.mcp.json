@@ -5,7 +5,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "site-shot-mcp@1.2.2"
+        "site-shot-mcp@1.2.3"
       ],
       "env": {
         "SITESHOT_API_KEY": "${SITESHOT_API_KEY}"
