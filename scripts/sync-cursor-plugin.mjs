@@ -9,7 +9,7 @@
 //     site-shot-mcp@<version> in plugins/site-shot-cursor/.mcp.json.
 // test/plugin-metadata.test.mjs fails if these drift, and names this script as the fix.
 //
-//   npm run sync:cursor
+//   node scripts/sync-cursor-plugin.mjs
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

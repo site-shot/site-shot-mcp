@@ -1,7 +1,7 @@
 {
   "name": "site-shot",
   "version": "1.2.3",
-  "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
+  "description": "Website screenshots for AI agents: real Chromium, full-page capture, automatic ad & cookie-banner removal, ISO-code country proxies on paid plans. Wraps the published site-shot-mcp stdio server.",
   "author": {
     "name": "Site-Shot",
     "email": "support@site-shot.com",
