@@ -10,3 +10,4 @@ plugins
 .agents
 scripts
 DEVELOPMENT.md
+.cursor-plugin

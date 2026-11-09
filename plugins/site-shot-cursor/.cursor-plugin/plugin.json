@@ -1,0 +1,25 @@
+{
+  "name": "site-shot",
+  "displayName": "Site-Shot Screenshot API",
+  "description": "Website screenshot API for Cursor: capture public web pages as PNG, JPEG or WebP in real Chromium, full page or viewport, with automatic ad and cookie-banner removal and country proxies on paid plans. Needs a Site-Shot API key in SITESHOT_API_KEY (get it at https://www.site-shot.com/start/): a confirmed account's key comes with the free plan, 100 API captures a month, no card needed; free-plan captures come from the default location or the US, other countries need a paid plan.",
+  "version": "1.2.3",
+  "author": {
+    "name": "Site-Shot",
+    "email": "support@site-shot.com",
+    "url": "https://www.site-shot.com/"
+  },
+  "homepage": "https://www.site-shot.com/ai-agents/",
+  "repository": "https://github.com/site-shot/site-shot-mcp",
+  "license": "MIT",
+  "logo": "https://raw.githubusercontent.com/site-shot/site-shot-mcp/HEAD/assets/logo.png",
+  "keywords": [
+    "screenshot",
+    "website screenshot",
+    "screenshot api",
+    "full page screenshot",
+    "mcp",
+    "site-shot"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

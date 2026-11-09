@@ -482,6 +482,87 @@ test("the Tessl plugin ships the shared skill and the same pinned release", () =
   }
 });
 
+// cursor.directory imports a public repo that follows the Open Plugins layout: a
+// .cursor-plugin/marketplace.json at the root pointing at a directory with its own
+// .cursor-plugin/plugin.json, .mcp.json and skills/. That directory carries copies of the shared
+// skill, the LICENSE and the release pin, derived by `node scripts/sync-cursor-plugin.mjs`; this
+// test is what stops a release from bumping or editing the shared plugin and leaving the Cursor
+// copy behind. It cannot use plugins/site-shot/.mcp.json, whose ${user_config.*} reference only
+// Claude Code expands.
+test("the Cursor plugin ships the shared skill and the same pinned release", () => {
+  const cursorDir = "plugins/site-shot-cursor";
+  const fix = "run `node scripts/sync-cursor-plugin.mjs`";
+  assert.deepEqual(
+    filesUnder(cursorDir),
+    [
+      `${cursorDir}/.cursor-plugin/plugin.json`,
+      `${cursorDir}/.mcp.json`,
+      `${cursorDir}/LICENSE`,
+      `${cursorDir}/skills/website-screenshots/SKILL.md`,
+    ],
+    "a Cursor manifest, its MCP config, the license and the shared skill, nothing else",
+  );
+  assert.deepEqual(filesUnder(".cursor-plugin"), [".cursor-plugin/marketplace.json"], "one Cursor marketplace file");
+  assert.equal(
+    read(cursorDir, "skills", "website-screenshots", "SKILL.md"),
+    read(pluginDir, "skills", "website-screenshots", "SKILL.md"),
+    `the Cursor skill is the shared skill, byte for byte (${fix})`,
+  );
+  assert.equal(read(cursorDir, "LICENSE"), read("LICENSE"), `the Cursor LICENSE is the repo's (${fix})`);
+
+  const cursorMarketplace = readJson(".cursor-plugin", "marketplace.json");
+  const cursorPlugin = readJson(cursorDir, ".cursor-plugin", "plugin.json");
+  assert.equal(cursorMarketplace.version, pkg.version, `the Cursor marketplace version tracks the package (${fix})`);
+  assert.equal(cursorMarketplace.metadata?.version, pkg.version, `the Cursor marketplace metadata version tracks the package (${fix})`);
+  assert.equal(cursorPlugin.version, pkg.version, `the Cursor plugin version tracks the package (${fix})`);
+  assert.equal(cursorMarketplace.plugins?.length, 1, "one plugin in the Cursor marketplace");
+  assert.equal(cursorMarketplace.plugins[0].source, cursorDir, "the marketplace points at the Cursor directory");
+  assert.equal(cursorMarketplace.plugins[0].name, cursorPlugin.name, "marketplace entry and manifest agree on the name");
+  assert.equal(cursorPlugin.name, "site-shot");
+  assert.equal(cursorPlugin.skills, "./skills/");
+  assert.equal(cursorPlugin.mcpServers, "./.mcp.json");
+  assert.equal(cursorPlugin.license, pkg.license);
+  assert.ok(statSync(join(repoRoot, cursorMarketplace.logo)).isFile(), "the marketplace logo is a file in the repo");
+
+  // Cursor expands ${env:NAME} in an MCP config. Not ${user_config.*} (Claude Code only), and never a
+  // literal key.
+  const server = assertPinnedRelease(readJson(cursorDir, ".mcp.json"), "cursor");
+  assert.deepEqual(server.env, { SITESHOT_API_KEY: "${env:SITESHOT_API_KEY}" }, "the key is an environment reference");
+
+  // The same listing text in all three places, with the free plan's bounds and no overclaim.
+  const descriptions = {
+    "marketplace.json description": cursorMarketplace.description,
+    "marketplace.json metadata.description": cursorMarketplace.metadata?.description,
+    "marketplace.json plugins[0].description": cursorMarketplace.plugins[0].description,
+    "plugin.json description": cursorPlugin.description,
+  };
+  for (const [where, description] of Object.entries(descriptions)) {
+    assert.equal(description, cursorPlugin.description, `${where} matches plugin.json`);
+    assert.match(description, /^Website screenshot API\b/, `${where}: opens with the task words`);
+    assert.match(description, FREE_PLAN_OFFER, `${where}: offers the free plan with its three facts`);
+    assert.match(description, FREE_PLAN_LOCATION_BOUND, `${where}: no geotargeting implied on the free plan`);
+    assert.match(description, /\bcountry proxies on paid plans\b/, `${where}: country proxies are a paid-plan feature`);
+    assert.match(description, /https:\/\/www\.site-shot\.com\/start\//, `${where}: the key link is /start/`);
+  }
+  for (const file of [".cursor-plugin/marketplace.json", ...filesUnder(cursorDir)]) {
+    const text = read(file);
+    assert.doesNotMatch(text, FREE_PLAN_OVERCLAIM, `${file}: the free plan is not called a trial or a free tier`);
+    assert.doesNotMatch(text, /\bany (?:public )?(?:web ?page|URL)\b/i, `${file}: no promise to capture any page whatsoever`);
+    assert.doesNotMatch(text, /\bdevice emulation\b|\bcertified\b|\bimmutable\b|\bforensic\b/i, `${file}: no claim the product does not make`);
+    for (const [, value] of text.matchAll(/SITESHOT_API_KEY["'\s:=]+([A-Za-z0-9_\-]{8,})/g)) {
+      assert.fail(`${file} looks like it embeds a key: ${value.slice(0, 12)}…`);
+    }
+  }
+
+  // Not a plugin in the Claude Code or Codex marketplaces, and not in the npm package or the MCPB.
+  for (const m of [marketplace, codexMarketplace]) {
+    assert.doesNotMatch(JSON.stringify(m), /site-shot-cursor/, "the Claude/Codex marketplaces do not offer the Cursor copy");
+  }
+  assert.ok(!pkg.files.some((f) => /cursor/i.test(f)), "the npm files whitelist does not ship the Cursor plugin");
+  const mcpbignore = read(".mcpbignore").split("\n").map((l) => l.trim());
+  assert.ok(mcpbignore.includes(".cursor-plugin"), ".mcpbignore excludes .cursor-plugin/");
+});
+
 test("the skill only names tools and params the server actually serves", async () => {
   const skillPath = `${pluginDir}/skills/website-screenshots/SKILL.md`;
   const skill = read(skillPath);

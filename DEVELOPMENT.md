@@ -69,6 +69,21 @@ npx @tessl/cli@0.119.0 plugin lint .
 Publishing it (a Tessl login, a workspace, `"private": false` after Tessl approves it) is the
 owner's step.
 
+## The Cursor plugin
+
+`.cursor-plugin/marketplace.json` and `plugins/site-shot-cursor/` are the Open Plugins layout that
+cursor.directory reads when it imports a public GitHub repository: the shared skill and the pinned
+server. Cursor needs its own directory because `plugins/site-shot/.mcp.json` passes the key as
+Claude Code's `${user_config.SITESHOT_API_KEY}`, which Cursor would hand to the server literally;
+the Cursor `.mcp.json` uses `${env:SITESHOT_API_KEY}` instead. Its skill, `LICENSE`, versions and
+pin are copies; regenerate them with `node scripts/sync-cursor-plugin.mjs` after editing the skill
+or bumping the version. `npm run test:plugin` fails while they differ.
+
+Not yet run inside Cursor: whether a plugin install expands `${env:SITESHOT_API_KEY}` (if it does
+not, the server reports an unexpanded placeholder instead of sending it to the API), and whether
+Cursor's importer accepts the extra top-level keys in `marketplace.json`. Submitting the repository
+at cursor.directory (a sign-in) is the owner's step.
+
 ## Releasing
 
 A release changes the version in every place a host reads it. `package.json` is the source;
@@ -83,6 +98,8 @@ tests) fails until all of these match:
 - the pins `site-shot-mcp@<version>` in `plugins/site-shot/.mcp.json`, the Codex `mcpServers`, and
   the README snippets
 - `plugins/site-shot-tessl/` (run `npm run sync:tessl`)
+- `.cursor-plugin/marketplace.json` and `plugins/site-shot-cursor/` (run
+  `node scripts/sync-cursor-plugin.mjs`)
 
 Plugin users stay on the pinned release until the manifests with the new pin are on the default
 branch and they update (README: "Updating").

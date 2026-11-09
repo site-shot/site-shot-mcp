@@ -19,6 +19,10 @@ The server code is unchanged from 1.2.2; only the version it reports in the MCP 
   https://github.com/site-shot/site-shot-mcp` installs the pinned server and asks for the key as a
   sensitive setting. It lives in the repository; the npm package does not include it. Checked with
   gemini-cli 0.67.0.
+- `.cursor-plugin/marketplace.json` and `plugins/site-shot-cursor/`: the Open Plugins layout that
+  cursor.directory imports from a repository, with the shared skill and the pinned server, which
+  reads the key from `SITESHOT_API_KEY` in the environment. It lives in the repository; the npm
+  package does not include it.
 
 ## 1.2.2 — 2026-11-08
 
