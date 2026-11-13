@@ -12,6 +12,12 @@ transport; the stdio server behaves as released.
   20,000 px tall, which clients scale down until its text cannot be read. The worker's byte
   ceilings, its JSON replies and its rule that no upstream text or error image is returned
   are unchanged; it sends no progress notifications.
+- Two bounds apply to the worker's tiles only. A PNG that decodes to more than 128 MiB is not
+  cut, because two captures and the adapter share one memory cap. And tiles repeat rows — the
+  last one is aligned to the bottom, so a page just over one tile tall comes back as almost
+  two — so together they can outweigh the image they were cut from; when they would weigh
+  more than the image limit the reply budget is sized for, the image goes back whole. Either
+  way the capture arrives with a note, as it did before tiles, instead of being refused.
 
 ### Fixed
 

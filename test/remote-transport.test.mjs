@@ -540,6 +540,48 @@ test("a tall PNG comes back as tiles over the transport, as it does on stdio", a
   ]);
 });
 
+test("tiles that would outweigh the image limit go back as the one image that fits", async (t) => {
+  // Tiles repeat rows: 4500 rows come back as three tiles of 2000, 6000 rows in all, so together
+  // they weigh more than the image they were cut from. The reply budget is sized for one image of
+  // at most maxImageBytes; an image exactly at that limit must still arrive, whole, not be turned
+  // into a response_too_large refusal by its own tiles.
+  const tall = encodePng(64, 4500, (x, y) => [(x * 37 + y * 101) % 256, (x * y) % 256, (x ^ y) % 256, 255]);
+  const { fetchImpl } = makeFetch(() => okImage(tall));
+  const { config } = await withWorker(t, { fetchImpl, maxImageBytes: tall.length });
+
+  const page = await rpc(config.socketPath, {
+    jsonrpc: "2.0",
+    id: 8,
+    method: "tools/call",
+    params: { name: "capture_full_page", arguments: { url: "https://example.com" } },
+  });
+  assert.equal(page.status, 200);
+  assert.equal(page.json.result.isError, undefined);
+  const content = page.json.result.content;
+  const images = content.filter((part) => part.type === "image");
+  const texts = content.filter((part) => part.type === "text").map((part) => part.text);
+  assert.equal(images.length, 1, "the whole image, not tiles");
+  assert.equal(images[0].data, tall.toString("base64"), "byte for byte the image the API sent");
+  assert.equal(texts.length, 1);
+  assert.match(texts[0], /^This capture is 64 x 4500 px\./);
+  assert.match(texts[0], /could not be cut into tiles/);
+
+  // The same image one byte under a roomier limit is cut as usual, so the guard is the limit's
+  // doing and not something about this picture.
+  const roomy = await withWorker(t, { fetchImpl, maxImageBytes: tall.length * 2 });
+  const cut = await rpc(roomy.config.socketPath, {
+    jsonrpc: "2.0",
+    id: 9,
+    method: "tools/call",
+    params: { name: "capture_full_page", arguments: { url: "https://example.com" } },
+  });
+  const cutImages = cut.json.result.content.filter((part) => part.type === "image");
+  assert.equal(cutImages.length, 3);
+  const cutBytes = cutImages.reduce((sum, part) => sum + Buffer.from(part.data, "base64").length, 0);
+  assert.ok(cutBytes > tall.length, "the three tiles do outweigh the image, which is why the guard exists");
+  assert.ok(cutBytes <= tall.length * 2);
+});
+
 test("notifications are acknowledged without a response body", async (t) => {
   const { config } = await withWorker(t);
   const res = await rpc(config.socketPath, { jsonrpc: "2.0", method: "notifications/initialized" });

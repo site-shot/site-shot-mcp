@@ -192,7 +192,18 @@ function imageContent(buf, mimeType, tileOptions) {
     size.width > CLIENT_MAX_SIDE
       ? ` It is wider than ${CLIENT_MAX_SIDE} px, so clients may still scale it down; a smaller width keeps text sharper.`
       : "";
-  const tiles = mimeType === "image/png" && size.height > TILE_MAX_HEIGHT ? tilePng(buf, tileOptions) : null;
+  let tiles = mimeType === "image/png" && size.height > TILE_MAX_HEIGHT ? tilePng(buf, tileOptions) : null;
+  // Tiles repeat rows: neighbours overlap, and the last tile is aligned to the bottom, so a page
+  // just over one tile tall comes back as almost two. Together they can outweigh the image they
+  // were cut from. Where the reply has a byte budget sized for one image, tiles past that size
+  // would turn a capture that fits into a refusal, so the image goes back whole instead.
+  if (
+    tiles &&
+    tileOptions?.maxTotalBytes != null &&
+    tiles.reduce((sum, t) => sum + t.data.length, 0) > tileOptions.maxTotalBytes
+  ) {
+    tiles = null;
+  }
   if (tiles) {
     const end = tiles[tiles.length - 1].y + tiles[tiles.length - 1].height;
     // The reason given is the server's own stop, not the client's limit: a page just past the budget
@@ -537,8 +548,15 @@ export async function captureScreenshot(args, opts) {
           );
         }
         // The worker shares one memory cap between two captures and the adapter, so it decodes less
-      // than stdio will: a PNG past this goes back whole, with the note that says so.
-      return { content: imageContent(read.bytes, mimeType, { maxRawBytes: BOUNDED_TILE_RAW_BYTES }) };
+        // than stdio will, and its reply budget is sized for one image of at most maxImageBytes, so
+        // the tiles together may not weigh more than that. A PNG past either bound goes back whole,
+        // with the note that says so.
+        return {
+          content: imageContent(read.bytes, mimeType, {
+            maxRawBytes: BOUNDED_TILE_RAW_BYTES,
+            maxTotalBytes: maxImageBytes,
+          }),
+        };
       }
 
       // Error path. The body is read only to recognise the one marker we have a
