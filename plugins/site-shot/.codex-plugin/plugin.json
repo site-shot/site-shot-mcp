@@ -1,7 +1,7 @@
 {
   "name": "site-shot",
-  "version": "1.2.0",
-  "description": "Website screenshots for AI agents: real Chromium, full-page capture, ISO-code country proxies, automatic ad & cookie-banner removal. Wraps the published site-shot-mcp stdio server.",
+  "version": "1.2.3",
+  "description": "Website screenshots for AI agents: real Chromium, full-page capture, automatic ad & cookie-banner removal, ISO-code country proxies on paid plans. Wraps the published site-shot-mcp stdio server.",
   "author": {
     "name": "Site-Shot",
     "email": "support@site-shot.com",
@@ -15,22 +15,26 @@
   "mcpServers": {
     "site-shot": {
       "command": "npx",
-      "args": ["-y", "site-shot-mcp@1.2.0"],
+      "args": ["-y", "site-shot-mcp@1.2.3"],
       "env_vars": ["SITESHOT_API_KEY"]
     }
   },
   "interface": {
     "displayName": "Site-Shot Screenshots",
     "shortDescription": "Screenshot public web pages, including from another country",
-    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. Requires a paid Site-Shot API plan; captures use that account's existing API allowance and limits.",
+    "longDescription": "Renders a public URL in a real Chromium browser on Site-Shot's infrastructure and returns the image: viewport or full-page capture, a country proxy with matching language and time zone, and ad and cookie-banner removal on by default. A confirmed account's API key comes with the free plan: 100 API captures a month, no card needed; paid plans from $5/mo for 2,000 add volume. Free-plan captures come from the default location or the US; other countries need a paid plan.",
     "developerName": "Site-Shot",
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Read"],
     "websiteURL": "https://www.site-shot.com/",
+    "privacyPolicyURL": "https://www.site-shot.com/privacy-policy/",
+    "termsOfServiceURL": "https://www.site-shot.com/terms-of-use/",
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png",
     "defaultPrompt": [
       "Take a full-page screenshot of example.com.",
-      "Show me how this page renders from Germany.",
-      "Compare this page at mobile and desktop widths."
+      "Show me example.com at a 390 px mobile width.",
+      "Compare example.com at mobile and desktop widths."
     ]
   }
 }

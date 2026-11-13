@@ -1,0 +1,25 @@
+{
+  "name": "site-shot",
+  "version": "1.2.3",
+  "description": "Website screenshot API for Gemini CLI: capture public web pages as PNG, JPEG or WebP in real Chromium, full page or viewport, with automatic ad and cookie-banner removal and country proxies on paid plans.",
+  "mcpServers": {
+    "site-shot": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "site-shot-mcp@1.2.3"
+      ],
+      "env": {
+        "SITESHOT_API_KEY": "${SITESHOT_API_KEY}"
+      }
+    }
+  },
+  "settings": [
+    {
+      "name": "Site-Shot API key",
+      "description": "Your Site-Shot API key (the userkey). Get one at https://www.site-shot.com/start/ (a confirmed account's key comes with the free plan).",
+      "envVar": "SITESHOT_API_KEY",
+      "sensitive": true
+    }
+  ]
+}

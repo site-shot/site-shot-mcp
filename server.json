@@ -1,27 +1,27 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.site-shot/site-shot-mcp",
-  "description": "Website screenshots for AI agents: full-page, country proxies, ad & cookie-banner removal",
+  "description": "Website screenshot API for AI agents: full-page, ad & cookie-banner removal, paid-plan geo",
   "title": "Site-Shot",
   "websiteUrl": "https://www.site-shot.com/",
   "repository": {
     "url": "https://github.com/site-shot/site-shot-mcp",
     "source": "github"
   },
-  "version": "1.2.0",
+  "version": "1.2.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "site-shot-mcp",
-      "version": "1.2.0",
+      "version": "1.2.3",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "SITESHOT_API_KEY",
-          "description": "Site-Shot API key (the userkey). Get one at https://www.site-shot.com/pricing/",
+          "description": "Site-Shot API key (the userkey). Get one at https://www.site-shot.com/start/ (a confirmed account's key comes with the free plan: 100 API captures a month, no card needed; free-plan captures come from the default location or the US, other countries need a paid plan)",
           "isRequired": true,
           "isSecret": true
         }

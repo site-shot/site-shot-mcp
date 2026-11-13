@@ -29,6 +29,7 @@ const pluginDir = String(entry?.source ?? "").replace(/^\.\//, "");
 const plugin = readJson(pluginDir, ".claude-plugin", "plugin.json");
 const mcp = readJson(pluginDir, ".mcp.json");
 const readme = read("README.md");
+const development = read("DEVELOPMENT.md");
 
 // Codex installs the same plugin directory through its own marketplace and its own
 // manifest. The two hosts share everything except credential wiring: Claude Code
@@ -36,6 +37,20 @@ const readme = read("README.md");
 const codexMarketplace = readJson(".agents", "plugins", "marketplace.json");
 const codexEntry = codexMarketplace.plugins?.[0];
 const codexPlugin = readJson(pluginDir, ".codex-plugin", "plugin.json");
+
+// What a key needs: a confirmed account's key comes with the free plan (100 API captures a
+// month, no card), or the account has a paid plan. "Free plan" is the name the site uses. It
+// renews every month with no end date, so it is not a trial; and it is a bounded plan, so
+// "free tier", "free key", "free credits", "forever", "unlimited", "generous", "lifetime" or
+// "no expiry" would each promise more than it gives.
+const FREE_PLAN_OVERCLAIM =
+  /\btrial\b|\bfree\s+(?:tier|api\s+key|key|credits)\b|\bforever\b|\bunlimited\b|\bgenerous\b|\blifetime\b|\bno\s+expiry\b/i;
+// The free plan, named as the site names it, with its three facts in one sentence.
+const FREE_PLAN_OFFER =
+  /\bconfirmed\s+account\b[^.]*\bfree\s+plan\b[^.]*\b100\s+(?:API\s+)?captures\s+a\s+month\b[^.]*\bno\s+card\b/i;
+// The free plan renders from the default location or the US only. This package exposes
+// `country`, so any copy that offers the free plan says other countries need a paid plan.
+const FREE_PLAN_LOCATION_BOUND = /\bdefault\s+location\s+or\s+the\s+US\b[^.]*\bother\s+countries\s+need\s+a\s+paid\s+plan\b/i;
 
 /** Every file under dir, as repo-relative POSIX paths. */
 function filesUnder(dir) {
@@ -145,6 +160,27 @@ test("the MCP command stays pinned to the released npm package", () => {
   assertPinnedRelease(mcp, "claude");
 });
 
+// Gemini CLI's gallery (geminicli.com/extensions) indexes any public repository that carries the
+// `gemini-cli-extension` topic and this manifest at its root, so this file IS the listing. Gemini CLI
+// passes an extension's MCP server only the variables its `settings` declare, so a key that is
+// mapped in `env` but not declared would reach the server empty (checked with gemini-cli 0.67.0:
+// declared, the setting's value arrives as SITESHOT_API_KEY).
+test("the Gemini CLI extension runs the released package and asks for the key", () => {
+  const gemini = readJson("gemini-extension.json");
+  assert.equal(gemini.name, "site-shot", "the brand name, which is also the install directory");
+  assert.equal(gemini.version, pkg.version, "version tracks the package it installs");
+  assert.match(gemini.description, /screenshot/i, "the gallery shows this text; it carries the task word");
+
+  const server = assertPinnedRelease(gemini, "gemini");
+  assert.deepEqual(server.env, { SITESHOT_API_KEY: "${SITESHOT_API_KEY}" }, "the key comes from the setting, never a literal");
+
+  assert.equal(gemini.settings?.length, 1, "one setting: the key");
+  const [setting] = gemini.settings;
+  assert.equal(setting.envVar, "SITESHOT_API_KEY", "declared, so Gemini CLI lets it through to the server");
+  assert.equal(setting.sensitive, true, "kept out of the plain-text .env");
+  assert.match(setting.description, /https:\/\/www\.site-shot\.com\/start\//, "says where the key comes from");
+});
+
 test("the Codex marketplace installs the same plugin directory", () => {
   assert.equal(codexMarketplace.name, marketplace.name, "one brand name across both hosts");
   assert.equal(codexMarketplace.plugins.length, 1, "exactly one plugin is offered");
@@ -237,9 +273,29 @@ test("the Codex interface metadata is complete and claims nothing extra", () => 
     assert.ok(prompt.length <= 128, `starter prompt stays within 128 chars: "${prompt}"`);
   }
 
+  // A starter prompt runs as typed in a fresh session: it names its own URL, and asks only for what
+  // every plan can do. "Show me how this page renders from Germany" had neither: no page, and a
+  // country the free plan refuses while still counting the capture.
+  for (const prompt of ui.defaultPrompt) {
+    assert.doesNotMatch(prompt, /\bthis page\b/i, `starter prompt names its page: "${prompt}"`);
+    assert.doesNotMatch(prompt, /\bfrom (?!the US\b)[A-Z]/, `no country beyond the free plan's: "${prompt}"`);
+  }
+
+  // Store-facing assets and policies, as Codex 0.147 reads them: https URLs, ./assets/ paths.
+  for (const field of ["privacyPolicyURL", "termsOfServiceURL"]) {
+    assert.match(ui[field] ?? "", /^https:\/\/www\.site-shot\.com\/[a-z-]+\/$/, `interface.${field} is a site URL`);
+  }
+  for (const field of ["logo", "composerIcon"]) {
+    assert.match(ui[field] ?? "", /^\.\/assets\/[a-z-]+\.png$/, `interface.${field} is a ./assets/ PNG`);
+    assert.ok(statSync(join(repoRoot, pluginDir, ui[field])).isFile(), `interface.${field} exists in the plugin`);
+  }
+
   const copy = JSON.stringify(ui);
   assert.doesNotMatch(copy, /\bdirector(?:y|ies)\b|\bcatalog\b/i, "no claim of a directory listing");
-  assert.doesNotMatch(copy, /\bguarantee|\bfree (?:trial|tier|key|plan)\b/i, "no guarantee or free-tier claim");
+  assert.doesNotMatch(copy, /\bguarantee/i, "no guarantee");
+  assert.match(ui.longDescription, FREE_PLAN_OFFER, "the listing names the free plan: 100 captures a month, no card");
+  assert.doesNotMatch(copy, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
+  assert.match(ui.longDescription, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
   assert.doesNotMatch(copy, /\bsigns? you in\b|\bauthenticates?\b|\blogs? in\b/i, "no authentication claim");
 });
 
@@ -272,18 +328,48 @@ test("the plugin asks Claude Code for the key as required sensitive config", () 
   assert.equal(cfg.title, "Site-Shot API key");
   assert.equal(cfg.sensitive, true, "sensitive: the value is masked, not echoed back");
   assert.equal(cfg.required, true, "required: enabling without a key fails loudly");
-  assert.match(cfg.description, /\bpaid\b/i, "the prompt states the API is paid before anyone types a key");
-  assert.doesNotMatch(cfg.description, /\bfree (?:trial|tier|api key|key|plan)\b/i, "no free-API-trial claim");
+  // Before anyone types a key, the prompt says what the key needs.
+  assert.match(
+    cfg.description,
+    FREE_PLAN_OFFER,
+    "the prompt names the free plan: 100 captures a month on a confirmed account, no card",
+  );
+  assert.match(cfg.description, /\bpaid\s+plans?\b/i, "and the paid plans as the way past it");
+  assert.match(cfg.description, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
+  assert.doesNotMatch(cfg.description, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
 
-  // Keys are managed in the dashboard. /start/ is the signup path and /pricing/ sells
-  // plans; sending someone there to find an existing key is a dead end.
-  assert.match(cfg.description, /https:\/\/www\.site-shot\.com\/dashboard\//, "key management link is the dashboard");
-  assert.doesNotMatch(cfg.description, /site-shot\.com\/start\//, "not the signup path");
+  // Where to find the key: /start/ shows a signed-in user's key and offers sign-up otherwise.
+  // /dashboard/ redirects a signed-out newcomer to the login page; /pricing/ sells plans only.
+  assert.match(cfg.description, /https:\/\/www\.site-shot\.com\/start\//, "the key link is /start/");
+  assert.doesNotMatch(cfg.description, /\/dashboard\//, "not the dashboard, a login redirect for newcomers");
 
   // A default would be a key someone shipped, and a fallback would quietly capture
   // against the wrong account rather than stopping.
   assert.equal(cfg.default, undefined, "no default value");
   assert.equal(cfg.options, undefined, "not an enum");
+});
+
+// The MCPB bundle (manifest.json) and the MCP Registry entry (server.json) ask for the same
+// key in their own words and offer the free plan too, so they owe the same bounds as the
+// Claude Code prompt: the free plan named as the site names it, the location bound stated, and
+// never a trial, a free tier or a free key.
+test("the MCPB and MCP Registry key descriptions offer the free plan with its bounds", () => {
+  const descriptions = {
+    "manifest.json user_config.api_key": readJson("manifest.json").user_config?.api_key?.description,
+    "server.json SITESHOT_API_KEY": readJson("server.json")
+      .packages?.flatMap((p) => p.environmentVariables ?? [])
+      .find((v) => v.name === "SITESHOT_API_KEY")?.description,
+  };
+  for (const [where, description] of Object.entries(descriptions)) {
+    assert.equal(typeof description, "string", `${where} has a description`);
+    assert.match(
+      description,
+      FREE_PLAN_OFFER,
+      `${where} names the free plan: 100 captures a month on a confirmed account, no card`,
+    );
+    assert.match(description, FREE_PLAN_LOCATION_BOUND, `${where}: no geotargeting implied on the free plan`);
+    assert.doesNotMatch(description, FREE_PLAN_OVERCLAIM, `${where}: the free plan is not called a trial, a free tier or a free key`);
+  }
 });
 
 test("the API key is forwarded as a placeholder, never embedded", () => {
@@ -313,9 +399,10 @@ test("the plugin ships only the files it declares — no hooks, no executables",
       `${pluginDir}/.claude-plugin/plugin.json`,
       `${pluginDir}/.codex-plugin/plugin.json`,
       `${pluginDir}/.mcp.json`,
+      `${pluginDir}/assets/logo.png`,
       `${pluginDir}/skills/website-screenshots/SKILL.md`,
     ],
-    "plugin contents are exactly one manifest and MCP config per host, plus one shared skill",
+    "plugin contents are exactly one manifest and MCP config per host, one shared skill and the Codex logo",
   );
 
   // Hooks, bin/ and monitors run code on the user's machine on Claude Code's schedule
@@ -343,6 +430,137 @@ test("the plugin ships only the files it declares — no hooks, no executables",
   // The npm whitelist is unchanged by plugin work: the package ships the server, the
   // marketplaces ship from git. Listing a plugin dir here would publish it twice.
   assert.deepEqual(pkg.files, ["src", "README.md", "CHANGELOG.md", "LICENSE"], "npm files whitelist unchanged");
+});
+
+// The Tessl Registry packages a directory, so its plugin carries copies: the shared skill, the
+// LICENSE, and the release pin. They are derived by `npm run sync:tessl`; this test is what stops
+// a release from bumping or editing the Claude/Codex plugin and leaving the Tessl copy behind.
+test("the Tessl plugin ships the shared skill and the same pinned release", () => {
+  const tesslDir = "plugins/site-shot-tessl";
+  const fix = "run `npm run sync:tessl`";
+  assert.deepEqual(
+    filesUnder(tesslDir),
+    [
+      `${tesslDir}/.mcp.json`,
+      `${tesslDir}/.tessl-plugin/plugin.json`,
+      `${tesslDir}/LICENSE`,
+      `${tesslDir}/skills/website-screenshots/SKILL.md`,
+    ],
+    "a Tessl manifest, its MCP config, the license and the shared skill, nothing else",
+  );
+  assert.equal(
+    read(tesslDir, "skills", "website-screenshots", "SKILL.md"),
+    read(pluginDir, "skills", "website-screenshots", "SKILL.md"),
+    `the Tessl skill is the shared skill, byte for byte (${fix})`,
+  );
+  assert.equal(read(tesslDir, "LICENSE"), read("LICENSE"), `the Tessl LICENSE is the repo's (${fix})`);
+
+  const manifest = readJson(tesslDir, ".tessl-plugin", "plugin.json");
+  assert.equal(manifest.name, "site-shot/website-screenshots");
+  assert.equal(manifest.version, pkg.version, `the Tessl version tracks the package (${fix})`);
+  assert.equal(manifest.skills, "./skills/");
+  assert.equal(manifest.mcpServers, ".mcp.json");
+  assert.equal(manifest.license, pkg.license);
+
+  const tesslMcp = readJson(tesslDir, ".mcp.json");
+  const server = assertPinnedRelease(tesslMcp, "tessl");
+  // Tessl ignores env_vars (tessl plugin lint 0.119.0: "ignored unsupported field(s) env_vars"), so
+  // the key goes in as a ${VAR} reference. Claude Code expands it; Codex does not, which is why the
+  // description says what to change and the server names an unexpanded placeholder.
+  assert.deepEqual(server.env, { SITESHOT_API_KEY: "${SITESHOT_API_KEY}" }, "the key is an environment reference");
+  assert.ok(manifest.description.includes('env_vars = ["SITESHOT_API_KEY"]'), "the listing gives the Codex fix");
+  assert.doesNotMatch(JSON.stringify(manifest), FREE_PLAN_OVERCLAIM);
+
+  // Not a third plugin in the Claude Code or Codex marketplaces.
+  for (const m of [marketplace, codexMarketplace]) {
+    assert.doesNotMatch(JSON.stringify(m), /site-shot-tessl/, "the marketplaces do not offer the Tessl copy");
+  }
+  for (const file of filesUnder(tesslDir)) {
+    for (const [, value] of read(file).matchAll(/SITESHOT_API_KEY["'\s:=]+([A-Za-z0-9_\-]{8,})/g)) {
+      assert.fail(`${file} looks like it embeds a key: ${value.slice(0, 12)}…`);
+    }
+  }
+});
+
+// cursor.directory imports a public repo that follows the Open Plugins layout: a
+// .cursor-plugin/marketplace.json at the root pointing at a directory with its own
+// .cursor-plugin/plugin.json, .mcp.json and skills/. That directory carries copies of the shared
+// skill, the LICENSE and the release pin, derived by `node scripts/sync-cursor-plugin.mjs`; this
+// test is what stops a release from bumping or editing the shared plugin and leaving the Cursor
+// copy behind. It cannot use plugins/site-shot/.mcp.json, whose ${user_config.*} reference only
+// Claude Code expands.
+test("the Cursor plugin ships the shared skill and the same pinned release", () => {
+  const cursorDir = "plugins/site-shot-cursor";
+  const fix = "run `node scripts/sync-cursor-plugin.mjs`";
+  assert.deepEqual(
+    filesUnder(cursorDir),
+    [
+      `${cursorDir}/.cursor-plugin/plugin.json`,
+      `${cursorDir}/.mcp.json`,
+      `${cursorDir}/LICENSE`,
+      `${cursorDir}/skills/website-screenshots/SKILL.md`,
+    ],
+    "a Cursor manifest, its MCP config, the license and the shared skill, nothing else",
+  );
+  assert.deepEqual(filesUnder(".cursor-plugin"), [".cursor-plugin/marketplace.json"], "one Cursor marketplace file");
+  assert.equal(
+    read(cursorDir, "skills", "website-screenshots", "SKILL.md"),
+    read(pluginDir, "skills", "website-screenshots", "SKILL.md"),
+    `the Cursor skill is the shared skill, byte for byte (${fix})`,
+  );
+  assert.equal(read(cursorDir, "LICENSE"), read("LICENSE"), `the Cursor LICENSE is the repo's (${fix})`);
+
+  const cursorMarketplace = readJson(".cursor-plugin", "marketplace.json");
+  const cursorPlugin = readJson(cursorDir, ".cursor-plugin", "plugin.json");
+  assert.equal(cursorMarketplace.version, pkg.version, `the Cursor marketplace version tracks the package (${fix})`);
+  assert.equal(cursorMarketplace.metadata?.version, pkg.version, `the Cursor marketplace metadata version tracks the package (${fix})`);
+  assert.equal(cursorPlugin.version, pkg.version, `the Cursor plugin version tracks the package (${fix})`);
+  assert.equal(cursorMarketplace.plugins?.length, 1, "one plugin in the Cursor marketplace");
+  assert.equal(cursorMarketplace.plugins[0].source, cursorDir, "the marketplace points at the Cursor directory");
+  assert.equal(cursorMarketplace.plugins[0].name, cursorPlugin.name, "marketplace entry and manifest agree on the name");
+  assert.equal(cursorPlugin.name, "site-shot");
+  assert.equal(cursorPlugin.skills, "./skills/");
+  assert.equal(cursorPlugin.mcpServers, "./.mcp.json");
+  assert.equal(cursorPlugin.license, pkg.license);
+  assert.ok(statSync(join(repoRoot, cursorMarketplace.logo)).isFile(), "the marketplace logo is a file in the repo");
+
+  // Cursor expands ${env:NAME} in an MCP config. Not ${user_config.*} (Claude Code only), and never a
+  // literal key.
+  const server = assertPinnedRelease(readJson(cursorDir, ".mcp.json"), "cursor");
+  assert.deepEqual(server.env, { SITESHOT_API_KEY: "${env:SITESHOT_API_KEY}" }, "the key is an environment reference");
+
+  // The same listing text in all three places, with the free plan's bounds and no overclaim.
+  const descriptions = {
+    "marketplace.json description": cursorMarketplace.description,
+    "marketplace.json metadata.description": cursorMarketplace.metadata?.description,
+    "marketplace.json plugins[0].description": cursorMarketplace.plugins[0].description,
+    "plugin.json description": cursorPlugin.description,
+  };
+  for (const [where, description] of Object.entries(descriptions)) {
+    assert.equal(description, cursorPlugin.description, `${where} matches plugin.json`);
+    assert.match(description, /^Website screenshot API\b/, `${where}: opens with the task words`);
+    assert.match(description, FREE_PLAN_OFFER, `${where}: offers the free plan with its three facts`);
+    assert.match(description, FREE_PLAN_LOCATION_BOUND, `${where}: no geotargeting implied on the free plan`);
+    assert.match(description, /\bcountry proxies on paid plans\b/, `${where}: country proxies are a paid-plan feature`);
+    assert.match(description, /https:\/\/www\.site-shot\.com\/start\//, `${where}: the key link is /start/`);
+  }
+  for (const file of [".cursor-plugin/marketplace.json", ...filesUnder(cursorDir)]) {
+    const text = read(file);
+    assert.doesNotMatch(text, FREE_PLAN_OVERCLAIM, `${file}: the free plan is not called a trial or a free tier`);
+    assert.doesNotMatch(text, /\bany (?:public )?(?:web ?page|URL)\b/i, `${file}: no promise to capture any page whatsoever`);
+    assert.doesNotMatch(text, /\bdevice emulation\b|\bcertified\b|\bimmutable\b|\bforensic\b/i, `${file}: no claim the product does not make`);
+    for (const [, value] of text.matchAll(/SITESHOT_API_KEY["'\s:=]+([A-Za-z0-9_\-]{8,})/g)) {
+      assert.fail(`${file} looks like it embeds a key: ${value.slice(0, 12)}…`);
+    }
+  }
+
+  // Not a plugin in the Claude Code or Codex marketplaces, and not in the npm package or the MCPB.
+  for (const m of [marketplace, codexMarketplace]) {
+    assert.doesNotMatch(JSON.stringify(m), /site-shot-cursor/, "the Claude/Codex marketplaces do not offer the Cursor copy");
+  }
+  assert.ok(!pkg.files.some((f) => /cursor/i.test(f)), "the npm files whitelist does not ship the Cursor plugin");
+  const mcpbignore = read(".mcpbignore").split("\n").map((l) => l.trim());
+  assert.ok(mcpbignore.includes(".cursor-plugin"), ".mcpbignore excludes .cursor-plugin/");
 });
 
 test("the skill only names tools and params the server actually serves", async () => {
@@ -424,12 +642,22 @@ test("format accepts png, jpeg and webp, rejects tiff and jpg, and documents web
   await client.close();
 });
 
-test("the skill states the paid requirement and claims nothing it cannot do", () => {
+test("the skill states what the key needs and claims nothing it cannot do", () => {
   const skill = read(`${pluginDir}/skills/website-screenshots/SKILL.md`);
 
   assert.match(skill, /SITESHOT_API_KEY/, "names the variable the user has to set");
-  assert.match(skill, /\bpaid\b/i, "says the key is paid before the first call");
-  assert.doesNotMatch(skill, /\bfree (?:trial|tier|api key|key|plan)\b/i, "no free-API-trial claim");
+  // Before the first call: the free plan on a confirmed account, or a paid plan.
+  const from = skill.indexOf("## Before the first capture");
+  const to = skill.indexOf("## Capturing");
+  assert.ok(from > -1 && to > from, "the skill keeps its \"Before the first capture\" section");
+  const before = skill.slice(from, to);
+  assert.match(
+    before,
+    /\bfree\s+plan\b[^.]*\b100\s+captures\s+a\s+month\b[^.]*\bconfirmed\s+account\b[^.]*\bno\s+card\b[^.]*\bpaid\s+plan\b/i,
+    "says before the first call that the key needs the free plan or a paid plan",
+  );
+  assert.match(before, FREE_PLAN_LOCATION_BOUND, "no geotargeting implied on the free plan");
+  assert.doesNotMatch(skill, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
 
   // Point at the command the installer itself names, not at an enable-time prompt nobody
   // has observed. And the skill must not carry the direct-stdio tool-error behaviour over
@@ -476,6 +704,41 @@ test("the skill states the paid requirement and claims nothing it cannot do", ()
   assert.doesNotMatch(skill, /\balways (?:use|choose|prefer|call)\b/i, "no always-choose-our-tool rule");
   assert.doesNotMatch(skill, /\bautomatic(?:ally)? retr|\bretry (?:ladder|loop)\b/i, "no automated retries");
   assert.match(skill, /\bre-?captur/i, "addresses re-capturing explicitly");
+});
+
+test("the skill says what the image really shows, where it goes, and what a failure means", () => {
+  const skill = read(`${pluginDir}/skills/website-screenshots/SKILL.md`);
+
+  // Ads and cookie banners are removed by default and the API may reuse cookies from earlier
+  // captures (fresh_session is never sent), so the capture is not "what a first-time visitor sees".
+  assert.doesNotMatch(skill, /\bfresh\b|first-time visitor/i, "no fresh-browser, first-visit claim");
+  assert.match(skill, /`block_ads`[^\n]*`block_cookie_banners`[^.]*on by default/, "both removals named as defaults");
+  assert.match(skill, /pass `false`/, "says how to keep banners or ads in the image");
+  assert.match(skill, /reuse cookies/i, "says earlier captures' cookies may be reused");
+
+  // Nothing is saved: the tools return the image into the conversation only.
+  assert.doesNotMatch(skill, /\barchiv(?:e|ing)\b(?![^.]*\brather than\b)|a record of what a page showed/i, "no archive promise");
+  assert.match(skill, /does not save it as a file/, "says the image is not saved");
+
+  // A failed call carries its status; the skill maps each common one to the person's next step.
+  const from = skill.indexOf("## When a capture fails");
+  assert.ok(from > -1, "the skill has a \"When a capture fails\" section");
+  const fails = skill.slice(from, skill.indexOf("\n## ", from + 1));
+  assert.match(fails, /HTTP 401[\s\S]*\/plugin configure site-shot@site-shot[\s\S]*SITESHOT_API_KEY[\s\S]*https:\/\/www\.site-shot\.com\/start\//);
+  assert.match(fails, /HTTP 403[\s\S]*https:\/\/www\.site-shot\.com\/start\/[\s\S]*https:\/\/www\.site-shot\.com\/pricing\//);
+  assert.match(fails, /HTTP 429/);
+  assert.match(fails, /placeholder/);
+  // The card is what Site-Shot reported, not a diagnosis: a host that does not resolve comes back
+  // as a card reading "504 Gateway Timeout", so an agent that trusts it reports a timeout for a
+  // mistyped domain and retries, and every retry is another capture.
+  assert.doesNotMatch(fails, /card names the\s+reason/, "the card is not promised to name the reason");
+  assert.match(fails, /error card[\s\S]*"504 Gateway Timeout"[\s\S]*URL's spelling[\s\S]*another capture/);
+
+  // One skill ships to hosts with and without the Claude Code plugin, so its setup names both.
+  assert.match(skill, /Tessl/, "a Tessl install is covered");
+  assert.ok(skill.includes('env_vars = ["SITESHOT_API_KEY"]'), "the Codex pass-through is spelled out");
+  assert.match(skill, /https:\/\/github\.com\/site-shot\/site-shot-mcp#codex-cli-plugin/, "links the setup, not \"the README\"");
+  assert.doesNotMatch(skill, /\bthe README\b/, "no reference to a README the reader may not have");
 });
 
 test("the skill permits a requested comparison, not unsolicited repeats", () => {
@@ -530,21 +793,22 @@ test("README commands match the manifests they document", () => {
   // --plugin-dir resolves against the session's cwd, and the one cwd that cannot work is
   // this repo: it *is* the site-shot-mcp package, so npx resolves the name locally, finds
   // no linked bin, and the server exits 127 with "command not found" before the handshake.
-  const pluginDirArg = /claude --plugin-dir (\S+)/.exec(readme)?.[1];
-  assert.ok(pluginDirArg, "README shows how to test the plugin before publication");
+  // That is maintainer material, so it lives in DEVELOPMENT.md, not in the user README.
+  const pluginDirArg = /claude --plugin-dir (\S+)/.exec(development)?.[1];
+  assert.ok(pluginDirArg, "DEVELOPMENT.md shows how to test the plugin from a checkout");
   assert.ok(pluginDirArg.startsWith("/"), `--plugin-dir example must be absolute, got "${pluginDirArg}"`);
   assert.ok(
     readme.includes(`site-shot-mcp@${pkg.version}`),
     "README quotes the same pinned version the plugin runs",
   );
 
-  // The marketplace commands only resolve once these manifests are on the public
-  // default branch. Printing them without that caveat reads as "already published".
-  const marketplaceSection = readme.slice(readme.indexOf("claude plugin marketplace add"));
-  assert.match(
-    marketplaceSection.slice(0, 1200),
-    /\b(?:after|once)\b[^.]*\b(?:published|public|default branch|merged)\b/i,
-    "README says the marketplace commands need the manifests published first",
+  // The manifests have been on the public default branch since b586a9a, and both installs were
+  // exercised from GitHub (Claude Code 2.1.283, Codex 0.147.0). A "works only once published"
+  // caveat now makes a two-command install look unfinished.
+  assert.doesNotMatch(
+    readme,
+    /\bonly\s+(?:after|once)\b[^.]*\b(?:published|public default branch)\b|Try it before that/i,
+    "no stale pre-publication caveat in the user README",
   );
 
   assert.ok(readme.includes("[mcp_servers.site-shot]"), "README documents the Codex TOML table");
@@ -555,26 +819,30 @@ test("README commands match the manifests they document", () => {
 
   // Claude Code collects the key itself through required sensitive userConfig. Telling
   // users to export it anyway would send a credential somewhere nothing reads it from.
+  // A command-line install does not ask for it (observed, Claude Code 2.1.283): the masked prompt
+  // is /plugin configure, so the install block has to include that step.
   const claudeCodeSection = section("## Claude Code");
-  assert.match(
-    claudeCodeSection,
-    /prompts you for\s+(?:it|the key|your [^.]{0,40}key)\b/i,
-    "README says Claude Code prompts for the key",
+  assert.match(claudeCodeSection, /masked prompt/i, "README says Claude Code collects the key in a masked prompt");
+  const install = claudeCodeSection.slice(claudeCodeSection.indexOf("### Install"), claudeCodeSection.indexOf("### The API key"));
+  assert.ok(
+    install.includes(`/plugin configure ${entry.name}@${marketplace.name}`),
+    "the install steps end with entering the key",
   );
+  assert.doesNotMatch(claudeCodeSection, /prompts you for/i, "no claim that the install itself prompts");
   assert.doesNotMatch(
     claudeCodeSection,
     /export SITESHOT_API_KEY|"SITESHOT_API_KEY":\s*"YOUR/i,
     "the Claude Code path never asks the user to paste or export the key",
   );
   assert.match(
-    claudeCodeSection,
+    development,
     /\bnot from this\s+checkout\b/i,
     "local testing warns against running from the MCP source checkout",
   );
   assert.match(
-    claudeCodeSection,
+    development,
     /command not found/,
-    "README names the observed failure so it is recognisable when hit",
+    "DEVELOPMENT.md names the observed failure so it is recognisable when hit",
   );
 
   // Where Claude Code puts a sensitive value is its business and varies by platform.
@@ -595,6 +863,30 @@ test("README commands match the manifests they document", () => {
   assert.match(readme, /claude_desktop_config\.json/, "Claude Desktop setup is preserved");
 });
 
+test("README starts users at /start/, with a quick start and update steps", () => {
+  // The first thing in the README is how to start: key, client, first prompt.
+  const quick = readme.indexOf("## Quick start");
+  assert.ok(quick > -1 && quick < readme.indexOf("## Claude Code"), "a quick start comes before the per-client sections");
+  assert.match(section("## Quick start"), /https:\/\/www\.site-shot\.com\/start\//, "the quick start links /start/ for the key");
+  assert.match(section("## Quick start"), /example\.com/, "and gives a first prompt");
+  // /dashboard/ is a login redirect for a signed-out newcomer.
+  assert.doesNotMatch(readme, /site-shot\.com\/dashboard\//, "keys are found at /start/, not the dashboard");
+
+  // Plugin users are pinned to one release; an update is how a fix reaches them.
+  assert.ok(section("## Claude Code").includes("claude plugin marketplace update site-shot"), "Claude Code update: marketplace");
+  assert.ok(section("## Claude Code").includes(`claude plugin update ${entry.name}@${marketplace.name}`), "Claude Code update: plugin");
+  assert.ok(section("## Codex CLI").includes("codex plugin marketplace upgrade site-shot"), "Codex update: marketplace");
+
+  // The skill links this anchor for Codex setup: keep the heading that produces it.
+  assert.match(readme, /^## Codex CLI \(plugin\)$/m, "the #codex-cli-plugin anchor the skill links exists");
+
+  // A persistent key option next to the one-shot prompt, without a key on a command line.
+  const codex = section("## Codex CLI");
+  assert.match(codex, /For every session/, "a persistent option is offered");
+  assert.match(codex, /chmod 600/, "the key file is private");
+  assert.match(codex, /trade-off/i, "and its trade-off is named");
+});
+
 test("README describes what the plugin runs, and what a missing key really does", () => {
   const claudeCodeSection = section("## Claude Code");
 
@@ -606,15 +898,14 @@ test("README describes what the plugin runs, and what a missing key really does"
   assert.match(claudeCodeSection, /scheduled[^.]*\bjobs?\b/i, "scheduled capture jobs named");
   assert.match(claudeCodeSection, /stdio MCP server/i, "names the one process the plugin does launch");
 
-  // Two separate layers, and only one of them has been exercised. The isolated
-  // install/list run never started a model session, so whether Claude Code launches the
-  // server or offers the tools with a required setting unset is simply unknown here.
-  // The missing-key tool error is a fact about the stdio server, observed directly;
-  // carrying it over to the plugin path would be inventing the untested half.
-  assert.doesNotMatch(
-    readme,
-    /\b(?:server|plugin)[^.]{0,40}(?:will not|won't|refuses to|does not) start\b/i,
-    "no invented startup guarantee",
+  // Two separate layers. With the required setting unset, Claude Code does not list the server
+  // and offers no tools (observed by two audits with an isolated CLAUDE_CONFIG_DIR, Claude Code
+  // 2.1.283: `claude mcp list` -> "No MCP servers configured"). The missing-key tool error is a
+  // fact about the stdio server, observed directly; it is not carried over to the plugin path.
+  assert.match(
+    section("## Claude Code"),
+    /Until the key is set[^.]*does not list the server[^.]*tools do not appear[^.]*observed with Claude Code \d/,
+    "README states the observed unset-key behaviour, with the version it was observed on",
   );
   assert.doesNotMatch(
     readme,
@@ -667,7 +958,13 @@ test("README is honest about where this is and is not distributed", () => {
 
   // Name the two routes that actually need a hosted endpoint. "Public directories
   // require HTTPS" would be false: the MCP Registry lists this stdio package today.
-  assert.match(readme, /not listed[\s\S]{0,200}?\bdirectory\b/i, "states plainly that those listings do not exist");
+  // The README (2026-10-27) says publication "does not imply listing" in those directories
+  // rather than "is not listed": either disclaims the listing; neither may be dropped.
+  assert.match(
+    readme,
+    /\b(?:not listed|does not imply listing)\b[\s\S]{0,200}?\bdirectory\b/i,
+    "disclaims a listing in the ChatGPT/Codex and Claude connector directories",
+  );
   assert.match(readme, /hosted HTTPS/i, "names what those routes require");
   assert.doesNotMatch(
     readme,
@@ -697,7 +994,46 @@ test("copy does not imply per-capture charges or promise every page", () => {
     // and a failed capture is not automatically a paid one.
     assert.doesNotMatch(text, /\bbilled\b|\bcharged\b|\bper[- ]capture (?:charge|cost|fee)\b/i, "no per-invocation billing claim");
     assert.doesNotMatch(text, /\bany (?:public )?web page\b/i, "no promise to capture any page whatsoever");
+    // The README and every listing, not only the key prompts: the free plan is never a trial.
+    assert.doesNotMatch(text, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial, a free tier or a free key");
   }
+});
+
+// Vision models are billed by image size, so removing ads and banners does not by itself lower
+// vision-token cost; the website says so (/ai-agents/ FAQ). The tool text every agent reads, the
+// README and the MCPB listing used to promise "fewer vision tokens" anyway.
+test("no copy promises fewer vision tokens", async () => {
+  const tools = await servedTools();
+  const copy = {
+    "served tool descriptions": JSON.stringify(tools),
+    "README.md": readme,
+    "manifest.json": read("manifest.json"),
+    "server.json": read("server.json"),
+    "package.json": read("package.json"),
+    "Claude plugin": JSON.stringify(plugin) + JSON.stringify(marketplace),
+    "Codex plugin": JSON.stringify(codexPlugin),
+  };
+  for (const [where, text] of Object.entries(copy)) {
+    assert.doesNotMatch(text, /fewer\s+(?:vision\s+)?tokens|saves?\s+(?:vision\s+)?tokens|lower\s+token/i, `${where}: no token-saving claim`);
+    assert.doesNotMatch(text, /\bany\s+web\s+page\b/i, `${where}: no promise to see any page`);
+  }
+});
+
+// npm search does not stem and does not split hyphenated keywords: on 2026-11-09 this package
+// ranked outside the top 1500 for "screenshot mcp" and "screenshot api", although
+// "screenshot-api" was a keyword. The description is what the results list shows and what the
+// ranking reads first, so it opens with the task words; the spaced phrases are keywords too.
+test("the npm description and keywords carry the words people search for", () => {
+  assert.match(pkg.description, /^Website screenshot API\b/, "the description opens with the task words");
+  assert.match(pkg.description, /\bMCP server\b/, "and says what the package is");
+  assert.match(pkg.description, /\bcountry proxies on paid plans\b/, "country proxies are a paid-plan feature, not a free-plan one");
+  assert.doesNotMatch(pkg.description, /\bany (?:public )?web ?page\b/i, "no promise to capture any page whatsoever");
+  assert.doesNotMatch(pkg.description, /\bdevice emulation\b|\bcertified\b|\bimmutable\b|\bforensic\b/i, "no claim the product does not make");
+  assert.doesNotMatch(pkg.description, FREE_PLAN_OVERCLAIM, "the free plan is not called a trial or a free tier");
+  for (const phrase of ["website screenshot", "screenshot api", "screenshot mcp"]) {
+    assert.ok(pkg.keywords.includes(phrase), `keywords include the spaced phrase "${phrase}"`);
+  }
+  assert.equal(new Set(pkg.keywords).size, pkg.keywords.length, "no duplicate keywords");
 });
 
 // The versions the tests above could not see. Everything they check is a file this
@@ -714,10 +1050,51 @@ test("every version this package states agrees with package.json", async () => {
   assert.equal(identity?.name, "site-shot", "the handshake keeps the brand name");
 
   assert.equal(readJson("manifest.json").version, pkg.version, "MCPB manifest tracks the package");
+  assert.equal(readJson("gemini-extension.json").version, pkg.version, "Gemini CLI extension tracks the package");
 
   const registry = readJson("server.json");
   assert.equal(registry.version, pkg.version, "MCP Registry entry tracks the package");
   for (const entry of registry.packages ?? []) {
     assert.equal(entry.version, pkg.version, `registry package "${entry.identifier}" tracks the package`);
   }
+});
+
+// Both tools hand the SDK a strict z.object(...) as inputSchema. SDK 1.12-1.21 wrap whatever they
+// get in z.object() as if it were a raw shape, so on those versions tools/list fails ("Cannot read
+// properties of null (reading '_def')") and every call fails with "keyValidator._parse is not a
+// function" (measured with 1.21.0). 1.22.0 is the first that takes a schema object as it is. The
+// lockfile pins a newer SDK, so the smoke suite cannot see an old one; a host project that already
+// pins one can dedupe to it, because src/server.js is the package's main. The declared floor is the
+// only guard.
+test("the declared MCP SDK range excludes versions that cannot take a schema object", () => {
+  const range = pkg.dependencies?.["@modelcontextprotocol/sdk"];
+  const floor = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range ?? "");
+  assert.ok(floor, `a caret range with a full version (got ${range})`);
+  const [major, minor] = [Number(floor[1]), Number(floor[2])];
+  assert.equal(major, 1, "the SDK range stays on 1.x");
+  assert.ok(minor >= 22, `the SDK floor is at least 1.22.0 (got ${range})`);
+  const lock = readJson("package-lock.json");
+  assert.equal(lock.packages?.[""]?.dependencies?.["@modelcontextprotocol/sdk"], range, "package-lock.json records the same range");
+  const locked = lock.packages?.["node_modules/@modelcontextprotocol/sdk"]?.version ?? "";
+  assert.ok(Number(locked.split(".")[1]) >= minor, `the locked SDK (${locked}) satisfies the floor`);
+});
+
+// The README is what a LangChain or CrewAI integrator reads before writing code against a result,
+// and what a person reads before trusting an error. Each line below was once stale: "both returning
+// the screenshot as an MCP image" while a tall PNG comes back as a text note and several tiles,
+// "every failure ... says what to do next" while a 400 or a 404 with API text adds no next step, and
+// "the card names the reason" while a host that does not resolve yields a card reading
+// "504 Gateway Timeout".
+test("README states the result shape, which failures say what to do, and what a card is", () => {
+  // Line breaks fall anywhere in prose, so the checks read it with whitespace collapsed.
+  const tools = section("## Tools").replace(/\s+/g, " ");
+  const all = readme.replace(/\s+/g, " ");
+  assert.doesNotMatch(tools, /both returning the screenshot as an MCP image\./, "not one image item for every capture");
+  assert.match(tools, /text note first/, "says a large capture starts with a text note");
+  assert.match(tools, /`content\[0\]`[^.]*`type: "image"`/, "tells integrators how to find the images");
+  assert.doesNotMatch(all, /Every failure[^.]*says what to do next/, "not every failure adds a next step");
+  assert.match(tools, /A 401 or a 429 also says what to do next[^.]*\([^)]*\), and so does a 403, 404 or 5xx when the API sent no text/);
+  assert.doesNotMatch(all, /\bnames the reason\b/, "the card is not promised to name the reason");
+  assert.match(tools, /"504 Gateway Timeout"[^.]*check the URL's spelling before retrying/);
+  assert.match(tools, /wider than 6,750 px gets one tile/, "the token cap names its width bound");
 });

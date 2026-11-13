@@ -33,6 +33,8 @@ import { fileURLToPath } from "node:url";
 
 import { createUdsWorker, configFromEnv } from "../src/uds-worker.js";
 import { captureScreenshot } from "../src/server.js";
+import { imageSize } from "../src/image-tiles.js";
+import { encodePng } from "./png-helpers.mjs";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 // A complete 1x1 lossless WebP: RIFF <size> WEBP, then a VP8L chunk. That is the
@@ -503,6 +505,39 @@ test("both tools capture through the shared implementation", async (t) => {
   const second = new URL(calls[1].url);
   assert.equal(second.searchParams.get("full_size"), "1");
   assert.equal(second.searchParams.get("max_height"), "20000");
+});
+
+test("a tall PNG comes back as tiles over the transport, as it does on stdio", async (t) => {
+  // The worker ran the 1.2.0 capture code until this branch and sent a full page back as one image
+  // up to 20,000 px tall. It now shares the tile code, inside the same byte ceilings.
+  const tall = encodePng(64, 4500, (x, y) => [x * 4, y % 256, (y >> 8) * 16, 255]);
+  const { fetchImpl } = makeFetch(() => okImage(tall));
+  const { config } = await withWorker(t, { fetchImpl });
+
+  const page = await rpc(config.socketPath, {
+    jsonrpc: "2.0",
+    id: 7,
+    method: "tools/call",
+    params: { name: "capture_full_page", arguments: { url: "https://example.com" } },
+  });
+  assert.equal(page.status, 200);
+  assert.equal(page.json.result.isError, undefined);
+  const content = page.json.result.content;
+  const images = content.filter((part) => part.type === "image");
+  const texts = content.filter((part) => part.type === "text").map((part) => part.text);
+  assert.equal(images.length, 3, "4500 rows are three tiles of at most 2000");
+  for (const image of images) {
+    assert.equal(image.mimeType, "image/png");
+    const size = imageSize(Buffer.from(image.data, "base64"));
+    assert.equal(size.width, 64);
+    assert.equal(size.height, 2000);
+  }
+  assert.match(texts[0], /comes back as 3 tiles, top to bottom/);
+  assert.deepEqual(texts.slice(1), [
+    "Tile 1 of 3: rows 0-1999 of 4500.",
+    "Tile 2 of 3: rows 1952-3951 of 4500.",
+    "Tile 3 of 3: rows 2500-4499 of 4500.",
+  ]);
 });
 
 test("notifications are acknowledged without a response body", async (t) => {

@@ -1,0 +1,10 @@
+{
+  "name": "site-shot/website-screenshots",
+  "version": "1.2.3",
+  "description": "Website screenshots for AI agents with Site-Shot: a real Chromium browser, full-page capture, and renders from a chosen country. Bundles the website-screenshots skill and the published site-shot-mcp server. Needs SITESHOT_API_KEY in the agent's environment; under Codex, replace the installed server's env table with env_vars = [\"SITESHOT_API_KEY\"].",
+  "license": "MIT",
+  "homepage": "https://www.site-shot.com/ai-agents/",
+  "skills": "./skills/",
+  "mcpServers": ".mcp.json",
+  "private": true
+}

@@ -1,8 +1,8 @@
 {
   "name": "site-shot-mcp",
-  "version": "1.2.0",
+  "version": "1.2.3",
   "mcpName": "io.github.site-shot/site-shot-mcp",
-  "description": "MCP server for Site-Shot — give Claude and other AI agents the ability to take website screenshots (real Chromium, full-page, country proxies, automatic ad & cookie-banner removal).",
+  "description": "Website screenshot API for AI agents: the Site-Shot MCP server lets Claude, Cursor and other agents capture web pages in real Chromium (full-page, country proxies on paid plans, automatic ad & cookie-banner removal).",
   "type": "module",
   "bin": {
     "site-shot-mcp": "src/index.js"
@@ -19,12 +19,13 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/server.js && node --check src/index.js && node --check src/uds-worker.js",
+    "check": "node --check src/server.js && node --check src/index.js && node --check src/image-tiles.js && node --check src/uds-worker.js",
     "smoke": "node test/smoke.mjs",
     "test:plugin": "node --test test/plugin-metadata.test.mjs",
     "test:remote": "NODE_OPTIONS=--expose-gc node --test --test-timeout=30000 test/remote-transport.test.mjs",
     "test:stdio": "node test/integration.mjs",
     "test": "npm run check && npm run smoke && npm run test:plugin && npm run test:remote && npm run test:stdio",
+    "sync:tessl": "node scripts/sync-tessl-plugin.mjs",
     "validate:plugin": "claude plugin validate --strict . && claude plugin validate --strict plugins/site-shot"
   },
   "keywords": [
@@ -36,7 +37,12 @@
     "claude",
     "ai-agents",
     "puppeteer",
-    "site-shot"
+    "site-shot",
+    "website screenshot",
+    "screenshot api",
+    "screenshot mcp",
+    "mcp server",
+    "full page screenshot"
   ],
   "homepage": "https://www.site-shot.com/",
   "repository": {
@@ -45,7 +51,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "zod": "3.25.76"
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "zod": "^3.23.8"
   }
 }
